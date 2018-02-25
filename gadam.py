@@ -6,7 +6,7 @@ from torch.optim.optimizer import Optimizer
 
 class GAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0,
-                 avg_sq_mode='global', amsgrad=True, weight_decay=0, eps=1e-8):
+                 avg_sq_mode='global', amsgrad=False, weight_decay=0, eps=1e-8):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight'
         """
@@ -113,8 +113,11 @@ class GAdam(Optimizer):
                 if group['weight_decay'] != 0:
                     exp_avg.add_(group['weight_decay'], p.data)
 
-                grad = exp_avg.add(-nesterov, prev_delta)
-                prev_delta.copy_(exp_avg)
+                if nesterov != 0:
+                    grad = exp_avg.add(-nesterov, prev_delta)
+                    prev_delta.copy_(exp_avg)
+                else:
+                    grad = exp_avg
 
                 p.data.add_(-lr / (1 - nesterov), grad)
 
