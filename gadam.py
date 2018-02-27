@@ -6,7 +6,7 @@ from torch.optim.optimizer import Optimizer
 
 class GAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0,
-                 avg_sq_mode='global', amsgrad=False, weight_decay=0, eps=1e-8):
+                 avg_sq_mode='tensor', amsgrad=False, weight_decay=0, eps=1e-8):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight'
         """
