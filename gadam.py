@@ -115,7 +115,7 @@ class GAdam(Optimizer):
                 if weight_decay != 0:
                     if group['norm_weight_decay']:
                         decay = weight_decay * p.data
-                        decay -= decay.sign() * decay.abs().mean()
+                        decay -= p.data.sign() * decay.abs().mean()
                         decay *= math.sqrt(p.data.pow(2).mean())
                         exp_avg += decay
                     else:
