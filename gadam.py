@@ -5,13 +5,12 @@ from torch.optim.optimizer import Optimizer
 
 
 class GAdam(Optimizer):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0, norm_weight_decay=False,
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0,
                  avg_sq_mode='weight', amsgrad=False, weight_decay=0, eps=1e-8):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight'
         """
-        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, eps=eps,
-                        weight_decay=weight_decay, norm_weight_decay=norm_weight_decay)
+        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, eps=eps, weight_decay=weight_decay)
         self.avg_sq_mode = avg_sq_mode
         super().__init__(params, defaults)
 
@@ -113,13 +112,7 @@ class GAdam(Optimizer):
 
                 weight_decay = group['weight_decay']
                 if weight_decay != 0:
-                    if group['norm_weight_decay']:
-                        decay = weight_decay * p.data
-                        decay -= p.data.sign() * decay.abs().mean()
-                        # decay *= math.sqrt(p.data.pow(2).mean())
-                        exp_avg += decay
-                    else:
-                        exp_avg.add_(weight_decay, p.data)
+                    exp_avg.add_(weight_decay, p.data)
 
                 if nesterov != 0:
                     grad = exp_avg.add(-nesterov, prev_delta)
