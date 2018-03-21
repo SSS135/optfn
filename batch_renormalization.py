@@ -21,14 +21,14 @@ class BatchReNorm1d(Module):
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
         self.register_buffer('running_mean', torch.zeros(num_features))
-        self.register_buffer('running_var', torch.ones(num_features))
+        self.register_buffer('running_std', torch.ones(num_features))
         self.register_buffer('r', torch.ones(1))
         self.register_buffer('d', torch.zeros(1))
         self.reset_parameters()
 
     def reset_parameters(self):
         self.running_mean.zero_()
-        self.running_var.fill_(1)
+        self.running_std.fill_(1)
         self.r.fill_(1)
         self.d.zero_()
         if self.affine:
@@ -45,19 +45,19 @@ class BatchReNorm1d(Module):
 
         if self.training:
             sample_mean = torch.mean(input, dim=0)
-            sample_var = torch.var(input, dim=0).clamp(min=1e-4)
+            sample_std = torch.std(input, dim=0) + self.eps
 
-            self.r = torch.clamp(sample_var.data / self.running_var,
+            self.r = torch.clamp(sample_std.data / self.running_std,
                                  1. / self.rmax, self.rmax)
-            self.d = torch.clamp((sample_mean.data - self.running_mean) / self.running_var,
+            self.d = torch.clamp((sample_mean.data - self.running_mean) / self.running_std,
                                  -self.dmax, self.dmax)
 
-            input_normalized = (input - sample_mean) / sample_var * Variable(self.r) + Variable(self.d)
+            input_normalized = (input - sample_mean) / sample_std * Variable(self.r) + Variable(self.d)
 
             self.running_mean += self.momentum * (sample_mean.data - self.running_mean)
-            self.running_var += self.momentum * (sample_var.data - self.running_var)
+            self.running_std += self.momentum * (sample_std.data - self.running_std)
         else:
-            input_normalized = (input - self.running_mean) / self.running_var
+            input_normalized = (input - self.running_mean) / self.running_std
 
         if self.affine:
             return input_normalized * self.weight + self.bias
@@ -71,7 +71,9 @@ class BatchReNorm1d(Module):
 
 class BatchReNorm2d(BatchReNorm1d):
     def forward(self, input):
-        s = input.shape
-        x = input.transpose(1, -1).contiguous().view(-1, s[1]).contiguous()
+        assert input.dim() == 4
+        x = input.permute(0, 2, 3, 1).contiguous().view(-1, input.shape[1])
         x = super().forward(x)
-        return x.view(s[0], -1, s[1]).transpose(1, -1).contiguous().view_as(input).contiguous()
+        x = x.view(input.shape[0], input.shape[2], input.shape[3], input.shape[1])
+        x = x.permute(0, 3, 1, 2).contiguous()
+        return x
