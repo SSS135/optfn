@@ -269,29 +269,32 @@ class BatchReNorm2dPTFunction(Function):
         return I_grad, None, None, weight_grad, bias_grad, None, None, None, None, None
 
 
-def batch_renorm2d(input, running_mean, running_std, weight=None, bias=None,
-                   training=False, momentum=0.01, eps=1e-5, rmax=3.0, dmax=5.0):
+def batch_renorm(input, running_mean, running_std, weight=None, bias=None,
+                 training=False, momentum=0.01, eps=1e-5, rmax=3.0, dmax=5.0):
+    b, c, _, _ = input.shape
+    input_3d = input.view(b, c, -1)
+
     if training:
         # (C, B * H * W)
-        input_1d = input.transpose(0, 1).contiguous().view(input.shape[1], -1)
+        input_1d = input_3d.transpose(0, 1).contiguous().view(c, -1)
         sample_mean = input_1d.mean(1)
-        sample_std = (input_1d.var(1) + eps).sqrt()
+        sample_std = input_1d.var(1).add_(eps).sqrt_()
 
-        r = torch.clamp(sample_std.data / running_std, 1. / rmax, rmax)
-        d = torch.clamp((sample_mean.data - running_mean) / running_std, -dmax, dmax)
+        r = (sample_std.data / running_std).clamp_(1. / rmax, rmax)
+        d = (sample_mean.data - running_mean).div_(running_std).clamp_(-dmax, dmax)
 
-        input_normalized = (input - sample_mean.view(1, -1, 1, 1)) / sample_std.view(1, -1, 1, 1)
-        input_normalized = input_normalized * Variable(r.view(1, -1, 1, 1)) + Variable(d.view(1, -1, 1, 1))
+        input_normalized = (input_3d - sample_mean.view(1, -1, 1)).div_(sample_std.view(1, -1, 1))
+        input_normalized.mul_(Variable(r.view(1, -1, 1))).add_(Variable(d.view(1, -1, 1)))
 
-        running_mean += momentum * (sample_mean.data - running_mean)
-        running_std += momentum * (sample_std.data - running_std)
+        running_mean.lerp_(sample_mean.data, momentum)
+        running_std.lerp_(sample_std.data, momentum)
     else:
-        input_normalized = (input - running_mean.view(1, -1, 1, 1)) / running_std.view(1, -1, 1, 1)
+        input_normalized = (input_3d - Variable(running_mean.view(1, -1, 1))).div_(Variable(running_std.view(1, -1, 1)))
 
     if weight is not None:
-        return input_normalized * weight.view(1, -1, 1, 1) + bias.view(1, -1, 1, 1)
-    else:
-        return input_normalized
+        input_normalized.mul_(weight.view(1, -1, 1)).add_(bias.view(1, -1, 1))
+
+    return input_normalized.view_as(input)
 
 
 def generate_data():
@@ -365,7 +368,7 @@ def check_gradients():
         return input, running_mean, running_std, weight, bias, True, 0.01, 1e-5, 3.0, 5.0
 
     naive_args = get_args()
-    out_naive = batch_renorm2d(*naive_args)
+    out_naive = batch_renorm(*naive_args)
     out_naive.mean().backward()
     tc_args = get_args()
     out_tc = BatchReNorm2dTCFunction.apply(*tc_args)
@@ -384,7 +387,7 @@ def check_gradients():
 
 def print_performance():
     profile_norm(F.batch_norm, 'THNN Batch Normalization:')
-    profile_norm(batch_renorm2d, 'PyTorch Batch Renormalization:', 3.0, 5.0)
+    profile_norm(batch_renorm, 'PyTorch Batch Renormalization:', 3.0, 5.0)
     profile_norm(BatchReNorm2dPTFunction.apply, 'PyTorch Function Batch Renormalization:', 3.0, 5.0)
     profile_norm(BatchReNorm2dTCFunction.apply, 'TC Batch Renormalization:', 3.0, 5.0)
 

@@ -3,54 +3,34 @@
 import torch
 from torch.nn import Parameter, Module
 from torch.autograd import Variable
-import torch.nn.functional as F
 
 
-def batch_renorm1d(input, running_mean, running_std, weight=None, bias=None,
-                   training=False, momentum=0.01, eps=1e-5, rmax=3.0, dmax=5.0):
-    if training:
-        sample_mean = torch.mean(input, dim=0)
-        sample_std = torch.std(input, dim=0) + eps
+def batch_renorm(input, running_mean, running_std, weight=None, bias=None,
+                 training=False, momentum=0.01, eps=1e-5, rmax=3.0, dmax=5.0):
+    b, c, _, _ = input.shape
+    input_3d = input.view(b, c, -1)
 
-        r = torch.clamp(sample_std.data / running_std, 1. / rmax, rmax)
-        d = torch.clamp((sample_mean.data - running_mean) / running_std, -dmax, dmax)
-
-        input_normalized = (input - sample_mean) / sample_std * Variable(r) + Variable(d)
-
-        running_mean += momentum * (sample_mean.data - running_mean)
-        running_std += momentum * (sample_std.data - running_std)
-    else:
-        input_normalized = (input - running_mean) / running_std
-
-    if weight is not None:
-        return input_normalized * weight + bias
-    else:
-        return input_normalized
-
-
-def batch_renorm2d(input, running_mean, running_std, weight=None, bias=None,
-                   training=False, momentum=0.01, eps=1e-5, rmax=3.0, dmax=5.0):
     if training:
         # (C, B * H * W)
-        input_1d = input.transpose(0, 1).contiguous().view(input.shape[1], -1)
+        input_1d = input_3d.transpose(0, 1).contiguous().view(c, -1)
         sample_mean = input_1d.mean(1)
-        sample_std = (input_1d.var(1) + eps).sqrt()
+        sample_std = input_1d.var(1).add_(eps).sqrt_()
 
-        r = torch.clamp(sample_std.data / running_std, 1. / rmax, rmax)
-        d = torch.clamp((sample_mean.data - running_mean) / running_std, -dmax, dmax)
+        r = (sample_std.data / running_std).clamp_(1. / rmax, rmax)
+        d = (sample_mean.data - running_mean).div_(running_std).clamp_(-dmax, dmax)
 
-        input_normalized = (input - sample_mean.view(1, -1, 1, 1)) / sample_std.view(1, -1, 1, 1)
-        input_normalized = input_normalized * Variable(r.view(1, -1, 1, 1)) + Variable(d.view(1, -1, 1, 1))
+        input_normalized = (input_3d - sample_mean.view(1, -1, 1)).div_(sample_std.view(1, -1, 1))
+        input_normalized.mul_(Variable(r.view(1, -1, 1))).add_(Variable(d.view(1, -1, 1)))
 
-        running_mean += momentum * (sample_mean.data - running_mean)
-        running_std += momentum * (sample_std.data - running_std)
+        running_mean.lerp_(sample_mean.data, momentum)
+        running_std.lerp_(sample_std.data, momentum)
     else:
-        input_normalized = (input - Variable(running_mean.view(1, -1, 1, 1))) / Variable(running_std.view(1, -1, 1, 1))
+        input_normalized = (input_3d - Variable(running_mean.view(1, -1, 1))).div_(Variable(running_std.view(1, -1, 1)))
 
     if weight is not None:
-        return input_normalized * weight.view(1, -1, 1, 1) + bias.view(1, -1, 1, 1)
-    else:
-        return input_normalized
+        input_normalized.mul_(weight.view(1, -1, 1)).add_(bias.view(1, -1, 1))
+
+    return input_normalized.view_as(input)
 
 
 class BatchReNorm1d(Module):
@@ -86,8 +66,8 @@ class BatchReNorm1d(Module):
 
     def forward(self, input):
         self._check_input_dim(input)
-        return batch_renorm1d(input, self.running_mean, self.running_std, self.weight, self.bias,
-                              self.training, self.momentum, self.eps, self.rmax, self.dmax)
+        return batch_renorm(input, self.running_mean, self.running_std, self.weight, self.bias,
+                            self.training, self.momentum, self.eps, self.rmax, self.dmax)
 
     def __repr__(self):
         return ('{name}({num_features}, eps={eps}, momentum={momentum}, affine={affine})'
@@ -95,7 +75,4 @@ class BatchReNorm1d(Module):
 
 
 class BatchReNorm2d(BatchReNorm1d):
-    def forward(self, input):
-        self._check_input_dim(input)
-        return batch_renorm2d(input, self.running_mean, self.running_std, self.weight, self.bias,
-                              self.training, self.momentum, self.eps, self.rmax, self.dmax)
+    pass

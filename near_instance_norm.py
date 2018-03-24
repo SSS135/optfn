@@ -3,7 +3,7 @@ from torch.nn import Parameter, Module
 from torch.autograd import Variable
 
 
-def near_instance_norm(input, running_mean, running_var, weight=None, bias=None,
+def near_instance_norm(input, running_mean, running_std, weight=None, bias=None,
                        training=False, momentum=0.01, near_momentum=0.2, eps=1e-5):
     assert (weight is None) == (bias is None)
 
@@ -13,20 +13,20 @@ def near_instance_norm(input, running_mean, running_var, weight=None, bias=None,
     input_2d = input.view(b * c, -1)
 
     inst_mean = input_2d.mean(-1)
-    inst_var = input_2d.var(-1).add_(eps)
+    inst_std = input_2d.var(-1).add_(eps).sqrt_()
 
     if training:
         running_mean.lerp_(inst_mean.data.view(b, c).mean(0), momentum)
-        running_var.lerp_(inst_var.data.view(b, c).mean(0), momentum)
+        running_std.lerp_(inst_std.data.view(b, c).mean(0), momentum)
 
     # make mean / var gradients scale independent of near_momentum (though somewhat incorrect)
     inst_mean.data.mul_(near_momentum)
-    inst_var.data.mul_(near_momentum)
+    inst_std.data.mul_(near_momentum)
 
     near_mean = inst_mean.add_(1 - near_momentum, Variable(running_mean.repeat(b)))
-    near_var = inst_var.add_(1 - near_momentum, Variable(running_var.repeat(b)))
+    near_std = inst_std.add_(1 - near_momentum, Variable(running_std.repeat(b)))
 
-    output = input_2d.sub(near_mean.unsqueeze(1)).div_(near_var.sqrt().unsqueeze(1))
+    output = input_2d.sub(near_mean.unsqueeze(1)).div_(near_std.unsqueeze(1))
 
     if weight is not None:
         output.mul_(weight.repeat(b).unsqueeze(1)).add_(bias.repeat(b).unsqueeze(1))
