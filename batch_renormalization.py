@@ -45,7 +45,7 @@ def batch_renorm2d(input, running_mean, running_std, weight=None, bias=None,
         running_mean += momentum * (sample_mean.data - running_mean)
         running_std += momentum * (sample_std.data - running_std)
     else:
-        input_normalized = (input - running_mean.view(1, -1, 1, 1)) / running_std.view(1, -1, 1, 1)
+        input_normalized = (input - Variable(running_mean.view(1, -1, 1, 1))) / Variable(running_std.view(1, -1, 1, 1))
 
     if weight is not None:
         return input_normalized * weight.view(1, -1, 1, 1) + bias.view(1, -1, 1, 1)

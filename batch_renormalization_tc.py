@@ -1,6 +1,7 @@
 import time
 
 import tensor_comprehensions as tc
+import tensor_comprehensions.tc_unit as tcu
 import torch
 import torch.cuda
 import torch.nn as nn
@@ -8,160 +9,181 @@ import torch.nn.functional as F
 from torch.autograd import Variable, Function
 
 
+class ArgCache:
+    def __init__(self, func):
+        self.func = func
+        self.outputs = None
+
+    def __call__(self, *args):
+        self.outputs = self.func(*args, outputs=self.outputs)
+        return self.outputs
+
+
 class BatchReNorm2dTCFunction(Function):
     LANG = """
-    def calc_mean_std(float(N,C,H,W) I) 
-    -> (batchMean, batchStd)
-    {
-       batchMean(c) +=! I(nn, c, hh, ww)
-       batchMean(c) = batchMean(c) / (N * H * W)
-       
-       batchStd(c) +=! (I(nn, c, hh, ww) - batchMean(c)) * (I(nn, c, hh, ww) - batchMean(c))
-       batchStd(c) = sqrt(batchStd(c) / (N * H * W) + params(2))
-    }
-    
-    def calc_r_d(float(C) batchStd, float(C) batchMean, float(C) rMeanIn, float(C) rStdIn, float(6) params)
-    -> (r, d)
-    {
-       r(c) = batchStd(c) / rStdIn(c)
-       r(c) = fmin(params(3), fmax(params(4), r(c)))
-       d(c) = (batchMean(c) - rMeanIn(c)) / rStdIn(c)
-       d(c) = fmin(params(5), fmax(-params(5), d(c)))
-    }
-    
-    def calc_O(float(N,C,H,W) I, float(C) weight, float(C) bias, float(C) batchStd, float(C) batchMean, float(C) r, float(C) d)
-    -> (O)
-    {
-       O(n, c, h, w) = (I(n, c, h, w) - batchMean(c)) / batchStd(c) * r(c) + d(c)
-       O(n, c, h, w) = weight(c) * O(n, c, h, w) + bias(c)
-    }
-    
-    def calc_running_mean_std(float(C) batchStd, float(C) batchMean, float(C) rMeanIn, float(C) rStdIn, float(6) params)
-    -> (rMeanOut, rStdOut)
-    {
-       rMeanOut(c) = params(1) * rMeanIn(c) + params(0) * batchMean(c)
-       rStdOut(c) = params(1) * rStdIn(c) + params(0) * batchStd(c)
-    }
-    
-    
-    def batch_renorm(float(N,C,H,W) I, float(C) rMeanIn, float(C) rStdIn, float(C) weight, float(C) bias, float(6) params)
-    -> (O, rMeanOut, rStdOut, batchMean, batchStd, r, d)
-    {
-       batchMean(c) +=! I(nn, c, hh, ww)
-       batchMean(c) = batchMean(c) / (N * H * W)
-       
-       batchStd(c) +=! (I(nn, c, hh, ww) - batchMean(c)) * (I(nn, c, hh, ww) - batchMean(c))
-       batchStd(c) = sqrt(batchStd(c) / (N * H * W) + params(2))
-       
-       r(c) = batchStd(c) / rStdIn(c)
-       r(c) = fmin(params(3), fmax(params(4), r(c)))
-       d(c) = (batchMean(c) - rMeanIn(c)) / rStdIn(c)
-       d(c) = fmin(params(5), fmax(-params(5), d(c)))
-    
-       O(n, c, h, w) = (I(n, c, h, w) - batchMean(c)) / batchStd(c) * r(c) + d(c)
-       O(n, c, h, w) = weight(c) * O(n, c, h, w) + bias(c)
-    
-       rMeanOut(c) = params(1) * rMeanIn(c) + params(0) * batchMean(c)
-       rStdOut(c) = params(1) * rStdIn(c) + params(0) * batchStd(c)
-    }
-    
-    def calc_xHat_grad(float(C) weight, float(N,C,H,W) O_grad)
-    -> (xHat_grad)
-    {
-        xHat_grad(nn, c, hh, ww) = O_grad(nn, c, hh, ww) * weight(c)
-    }
-    
-    def calc_mean_std_grad(float(N,C,H,W) I, float(C) batchMean, float(C) batchStd, float(C) r, float(N,C,H,W) xHat_grad)
-    -> (batchMean_grad, batchStd_grad)
-    {
-        batchStd_grad(c) +=! xHat_grad(nn, c, hh, ww) * (I(nn, c, hh, ww) - batchMean(c))
-        batchStd_grad(c) = batchStd_grad(c) * -r(c) / (batchStd(c) * batchStd(c))
-        batchMean_grad(c) +=! xHat_grad(nn, c, hh, ww)
-        batchMean_grad(c) = batchMean_grad(c) * -r(c) / batchStd(c)
-    }
-    
-    def calc_xHat(float(N,C,H,W) I, float(C) batchMean, float(C) batchStd, float(C) r, float(C) d)
-    -> (xHat)
-    {
-        xHat(n, c, h, w) = (I(n, c, h, w) - batchMean(c)) / batchStd(c) * r(c) + d(c)
-    }
-    
-    def calc_weight_bias_grad(float(N,C,H,W) O_grad, float(N,C,H,W) xHat)
-    -> (weight_grad, bias_grad)
-    {
-        weight_grad(c) +=! O_grad(nn, c, hh, ww) * xHat(nn, c, hh, ww)
-        bias_grad(c) +=! O_grad(nn, c, hh, ww)
-    }
-    
-    def calc_I_grad(float(N,C,H,W) I, float(C) batchMean, float(C) batchStd, float(C) r, float(N,C,H,W) xHat_grad, float(C) batchMean_grad, float(C) batchStd_grad)
-    -> (weight_grad, bias_grad)
-    {
-        I_grad(n, c, h, w) = xHat_grad(n, c, h, w) * r(c) / batchStd(c) + batchStd_grad(c) * (I(n, c, h, w) - batchMean(c)) / (batchStd(c) * N * H * W) + batchMean_grad(c) * (1 / (N * H * W))
-    }
-    
-    def batch_renorm_grad(float(N,C,H,W) I, float(C) weight, float(C) batchMean, float(C) batchStd, float(C) r, float(C) d, float(N,C,H,W) O_grad) 
-    -> (I_grad, weight_grad, bias_grad, batchMean_grad, batchStd_grad, xHat_grad, xHat) 
-    {
-        xHat_grad(nn, c, hh, ww) = O_grad(nn, c, hh, ww) * weight(c)
-        batchStd_grad(c) +=! xHat_grad(nn, c, hh, ww) * (I(nn, c, hh, ww) - batchMean(c))
-        batchStd_grad(c) = batchStd_grad(c) * -r(c) / (batchStd(c) * batchStd(c))
-        batchMean_grad(c) +=! xHat_grad(nn, c, hh, ww)
-        batchMean_grad(c) = batchMean_grad(c) * -r(c) / batchStd(c)
-        xHat(n, c, h, w) = (I(n, c, h, w) - batchMean(c)) / batchStd(c) * r(c) + d(c)
-        weight_grad(c) +=! O_grad(nn, c, hh, ww) * xHat(nn, c, hh, ww)
-        bias_grad(c) +=! O_grad(nn, c, hh, ww)
-        I_grad(n, c, h, w) = xHat_grad(n, c, h, w) * r(c) / batchStd(c) + batchStd_grad(c) * (I(n, c, h, w) - batchMean(c)) / (batchStd(c) * N * H * W) + batchMean_grad(c) * (1 / (N * H * W))
-    }
+def calc_mean_std(float(C,NHW) I, float(6) params) 
+-> (batchMean, batchStd)
+{
+   batchMean(c) +=! I(c, nhw)
+   batchMean(c) = batchMean(c) / (NHW)
+   
+   batchStd(c) +=! (I(c, nhw) - batchMean(c)) * (I(c, nhw) - batchMean(c))
+   batchStd(c) = sqrt(batchStd(c) / (NHW) + params(2))
+}
+
+def calc_r_d(float(C) batchStd, float(C) batchMean, float(C) rMeanIn, float(C) rStdIn, float(6) params)
+-> (r, d)
+{
+   r(c) = batchStd(c) / rStdIn(c)
+   r(c) = fmin(params(3), fmax(params(4), r(c)))
+   d(c) = (batchMean(c) - rMeanIn(c)) / rStdIn(c)
+   d(c) = fmin(params(5), fmax(-params(5), d(c)))
+}
+
+def calc_O(float(C,NHW) I, float(C) weight, float(C) bias, float(C) batchStd, float(C) batchMean, float(C) r, float(C) d)
+-> (O)
+{
+   O(c, nhw) = (I(c, nhw) - batchMean(c)) / batchStd(c) * r(c) + d(c)
+   O(c, nhw) = weight(c) * O(c, nhw) + bias(c)
+}
+
+def calc_running_mean_std(float(C) batchStd, float(C) batchMean, float(C) rMeanIn, float(C) rStdIn, float(6) params)
+-> (rMeanOut, rStdOut)
+{
+   rMeanOut(c) = params(1) * rMeanIn(c) + params(0) * batchMean(c)
+   rStdOut(c) = params(1) * rStdIn(c) + params(0) * batchStd(c)
+}
+
+
+def batch_renorm(float(C,NHW) I, float(C) rMeanIn, float(C) rStdIn, float(C) weight, float(C) bias, float(6) params)
+-> (O, rMeanOut, rStdOut, batchMean, batchStd, r, d)
+{
+   batchMean(c) +=! I(c, nhw)
+   batchMean(c) = batchMean(c) / (NHW)
+   
+   batchStd(c) +=! (I(c, nhw) - batchMean(c)) * (I(c, nhw) - batchMean(c))
+   batchStd(c) = sqrt(batchStd(c) / (NHW) + params(2))
+   
+   r(c) = batchStd(c) / rStdIn(c)
+   r(c) = fmin(params(3), fmax(params(4), r(c)))
+   d(c) = (batchMean(c) - rMeanIn(c)) / rStdIn(c)
+   d(c) = fmin(params(5), fmax(-params(5), d(c)))
+
+   O(c, nhw) = (I(c, nhw) - batchMean(c)) / batchStd(c) * r(c) + d(c)
+   O(c, nhw) = weight(c) * O(c, nhw) + bias(c)
+
+   rMeanOut(c) = params(1) * rMeanIn(c) + params(0) * batchMean(c)
+   rStdOut(c) = params(1) * rStdIn(c) + params(0) * batchStd(c)
+}
+
+def calc_xHat_grad(float(C) weight, float(C,NHW) O_grad)
+-> (xHat_grad)
+{
+    xHat_grad(c, nhw) = O_grad(c, nhw) * weight(c)
+}
+
+def calc_mean_std_grad(float(C,NHW) I, float(C) batchMean, float(C) batchStd, float(C) r, float(C,NHW) xHat_grad)
+-> (batchMean_grad, batchStd_grad)
+{
+    batchStd_grad(c) +=! xHat_grad(c, nhw) * (I(c, nhw) - batchMean(c))
+    batchStd_grad(c) = batchStd_grad(c) * -r(c) / (batchStd(c) * batchStd(c))
+    batchMean_grad(c) +=! xHat_grad(c, nhw)
+    batchMean_grad(c) = batchMean_grad(c) * -r(c) / batchStd(c)
+}
+
+def calc_xHat(float(C,NHW) I, float(C) batchMean, float(C) batchStd, float(C) r, float(C) d)
+-> (xHat)
+{
+    xHat(c, nhw) = (I(c, nhw) - batchMean(c)) / batchStd(c) * r(c) + d(c)
+}
+
+def calc_weight_bias_grad(float(C,NHW) O_grad, float(C,NHW) xHat)
+-> (weight_grad, bias_grad)
+{
+    weight_grad(c) +=! O_grad(c, nhw) * xHat(c, nhw)
+    bias_grad(c) +=! O_grad(c, nhw)
+}
+
+def calc_I_grad(float(C,NHW) I, float(C) batchMean, float(C) batchStd, float(C) r, float(C,NHW) xHat_grad, float(C) batchMean_grad, float(C) batchStd_grad)
+-> (I_grad)
+{
+    I_grad(c, nhw) = xHat_grad(c, nhw) * r(c) / batchStd(c) + batchStd_grad(c) * (I(c, nhw) - batchMean(c)) / (batchStd(c) * NHW) + batchMean_grad(c) * (1 / (NHW))
+}
+
+def batch_renorm_grad(float(C,NHW) I, float(C) weight, float(C) batchMean, float(C) batchStd, float(C) r, float(C) d, float(C,NHW) O_grad) 
+-> (I_grad, weight_grad, bias_grad, batchMean_grad, batchStd_grad, xHat_grad, xHat) 
+{
+    xHat_grad(c, nhw) = O_grad(c, nhw) * weight(c)
+    batchStd_grad(c) +=! xHat_grad(c, nhw) * (I(c, nhw) - batchMean(c))
+    batchStd_grad(c) = batchStd_grad(c) * -r(c) / (batchStd(c) * batchStd(c))
+    batchMean_grad(c) +=! xHat_grad(c, nhw)
+    batchMean_grad(c) = batchMean_grad(c) * -r(c) / batchStd(c)
+    xHat(c, nhw) = (I(c, nhw) - batchMean(c)) / batchStd(c) * r(c) + d(c)
+    weight_grad(c) +=! O_grad(c, nhw) * xHat(c, nhw)
+    bias_grad(c) +=! O_grad(c, nhw)
+    I_grad(c, nhw) = xHat_grad(c, nhw) * r(c) / batchStd(c) + batchStd_grad(c) * (I(c, nhw) - batchMean(c)) / (batchStd(c) * NHW) + batchMean_grad(c) * (1 / (NHW))
+}
     """
 
-    batch_renorm2d_kernel = tc.define(LANG, name="batch_renorm")
-    batch_renorm2d_grad_kernel = tc.define(LANG, name="batch_renorm_grad")
+    calc_mean_std = tc.define(LANG, name="calc_mean_std")
+    calc_r_d = tc.define(LANG, name="calc_r_d")
+    calc_O = tc.define(LANG, name="calc_O")
+    calc_running_mean_std = tc.define(LANG, name="calc_running_mean_std")
+    calc_xHat_grad = tc.define(LANG, name="calc_xHat_grad")
+    calc_mean_std_grad = tc.define(LANG, name="calc_mean_std_grad")
+    calc_xHat = tc.define(LANG, name="calc_xHat")
+    calc_weight_bias_grad = tc.define(LANG, name="calc_weight_bias_grad")
+    calc_I_grad = tc.define(LANG, name="calc_I_grad")
 
-    # used to store kernel outputs, made just for this test case, probably won't work in real code
-    prev_fwd_outs, prev_bwd_outs = None, None
+    calc_mean_std_cached = ArgCache(calc_mean_std)
+    calc_r_d_cached = ArgCache(calc_r_d)
+    calc_O_cached = ArgCache(calc_O)
+    calc_running_mean_std_cached = ArgCache(calc_running_mean_std)
+    calc_xHat_grad_cached = ArgCache(calc_xHat_grad)
+    calc_mean_std_grad_cached = ArgCache(calc_mean_std_grad)
+    calc_xHat_cached = ArgCache(calc_xHat)
+    calc_weight_bias_grad_cached = ArgCache(calc_weight_bias_grad)
+    calc_I_grad_cached = ArgCache(calc_I_grad)
 
-    # Note that both forward and backward are @staticmethods
     @staticmethod
     def forward(ctx, input, running_mean, running_std, weight, bias,
                 training, momentum, eps, rmax, dmax):
-        params = input.new([momentum, 1 - momentum, eps, rmax, 1 / rmax, dmax])
-        kernel_out = BatchReNorm2dTCFunction.batch_renorm2d_kernel(
-            input, running_mean, running_std, weight, bias, params, outputs=BatchReNorm2dTCFunction.prev_fwd_outs)
-        BatchReNorm2dTCFunction.prev_fwd_outs = kernel_out
-        O, rMeanOut, rStdOut, batchMean, batchStd, r, d = [v.data for v in kernel_out]
+        src_input_shape = input.shape
+        input = input.transpose(0, 1).contiguous().view(input.shape[1], -1)
 
-        ctx.save_for_backward(input, weight)
-        ctx.batchMean = batchMean
-        ctx.batchStd = batchStd
-        ctx.r = r
-        ctx.d = d
+        params = input.new([momentum, 1 - momentum, eps, rmax, 1 / rmax, dmax])
+
+        batchMean, batchStd = BatchReNorm2dTCFunction.calc_mean_std_cached(input, params)
+        r, d = BatchReNorm2dTCFunction.calc_r_d_cached(batchStd, batchMean, running_mean, running_std, params)
+        O = BatchReNorm2dTCFunction.calc_O_cached(input, weight, bias, batchStd, batchMean, r, d)
+        rMeanOut, rStdOut = BatchReNorm2dTCFunction.calc_running_mean_std_cached(batchStd, batchMean, running_mean, running_std, params)
+
+        O, rMeanOut, rStdOut, batchMean, batchStd, r, d = \
+            [v.data for v in (O, rMeanOut, rStdOut, batchMean, batchStd, r, d)]
+        ctx.extra_backward_vars = (input, weight, batchMean, batchStd, r, d)
 
         if training:
             running_mean.copy_(rMeanOut)
             running_std.copy_(rStdOut)
 
-        return O
+        tr_shape = src_input_shape[1], src_input_shape[0], src_input_shape[2], src_input_shape[3]
+        return O.view(tr_shape).transpose(0, 1).contiguous()
 
-    # This function has only a single output, so it gets only one gradient
     @staticmethod
     def backward(ctx, grad_output):
-        # This is a pattern that is very convenient - at the top of backward
-        # unpack saved_tensors and initialize all gradients w.r.t. inputs to
-        # None. Thanks to the fact that additional trailing Nones are
-        # ignored, the return statement is simple even when the function has
-        # optional inputs.
-        input, weight = ctx.saved_variables
-        batchMean = ctx.batchMean
-        batchStd = ctx.batchStd
-        r = ctx.r
-        d = ctx.d
+        src_input_shape = grad_output.shape
 
-        kernel_out = BatchReNorm2dTCFunction.batch_renorm2d_grad_kernel(
-            input, weight, batchMean, batchStd, r, d, grad_output, outputs=BatchReNorm2dTCFunction.prev_bwd_outs)
-        BatchReNorm2dTCFunction.prev_bwd_outs = kernel_out
-        I_grad, weight_grad, bias_grad, batchMean_grad, batchStd_grad, xHat_grad, xHat = kernel_out
+        input, weight, batchMean, batchStd, r, d = ctx.extra_backward_vars
+        grad_output = grad_output.data.transpose(0, 1).contiguous().view_as(input)
 
-        return I_grad, None, None, weight_grad, bias_grad, None, None, None, None, None
+        xHat_grad = BatchReNorm2dTCFunction.calc_xHat_grad_cached(weight, grad_output)
+        batchMean_grad, batchStd_grad = BatchReNorm2dTCFunction.calc_mean_std_grad_cached(input, batchMean, batchStd, r, xHat_grad)
+        xHat = BatchReNorm2dTCFunction.calc_xHat_cached(input, batchMean, batchStd, r, d)
+        weight_grad, bias_grad = BatchReNorm2dTCFunction.calc_weight_bias_grad_cached(grad_output, xHat)
+        I_grad = BatchReNorm2dTCFunction.calc_I_grad_cached(input, batchMean, batchStd, r, xHat_grad, batchMean_grad, batchStd_grad)
+
+        tr_shape = src_input_shape[1], src_input_shape[0], src_input_shape[2], src_input_shape[3]
+        return I_grad.view(tr_shape).transpose(0, 1).contiguous(), None, None, weight_grad, bias_grad, None, None, None, None, None
 
 
 class BatchReNorm2dPTFunction(Function):
@@ -282,26 +304,46 @@ def generate_data():
     return input, running_mean, running_std, weight, bias, params
 
 
+def autotune_with_named_cache(unit, *input_tensors, **tuner_kwargs):
+    hash_key = tcu.get_tc_hash_key(unit.kwargs_define['name'], *input_tensors)
+    tuner_kwargs['cache'] = f'/tmp/{hash_key}'
+    unit.autotune(*input_tensors, **tuner_kwargs)
+
+
 def autotune():
     input, running_mean, running_std, weight, bias, params = generate_data()
+    input = input.transpose(0, 1).contiguous().view(input.shape[1], -1)
+    grad_output = input.clone()
     options = tc.Options("mlp")
+    tuner_kwargs = dict(options=options, generations=1, pop_size=10, crossover_rate=80, number_elites=1, threads=20)
 
-    BatchReNorm2dTCFunction.batch_renorm2d_kernel.autotune(input, running_mean, running_std, weight, bias, params,
-                                                           options=options, cache=True, **tc.autotuner_settings)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_mean_std, input, params, **tuner_kwargs)
+    batchMean, batchStd = BatchReNorm2dTCFunction.calc_mean_std(input, params)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_r_d, batchStd, batchMean, running_mean, running_std, params, **tuner_kwargs)
+    r, d = BatchReNorm2dTCFunction.calc_r_d(batchStd, batchMean, running_mean, running_std, params)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_O, input, weight, bias, batchStd, batchMean, r, d, **tuner_kwargs)
+    O = BatchReNorm2dTCFunction.calc_O(input, weight, bias, batchStd, batchMean, r, d)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_running_mean_std, batchStd, batchMean, running_mean, running_std, params, **tuner_kwargs)
+    rMeanOut, rStdOut = BatchReNorm2dTCFunction.calc_running_mean_std(batchStd, batchMean, running_mean, running_std, params)
 
-    O, rMeanOut, rStdOut, batchMean, batchStd, r, d = \
-        BatchReNorm2dTCFunction.batch_renorm2d_kernel(input, running_mean, running_std, weight, bias, params)
-
-    BatchReNorm2dTCFunction.batch_renorm2d_grad_kernel.autotune(input, weight, batchMean, batchStd, r, d, input,
-                                                                options=options, cache=True, **tc.autotuner_settings)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_xHat_grad, weight, grad_output, **tuner_kwargs)
+    xHat_grad = BatchReNorm2dTCFunction.calc_xHat_grad(weight, grad_output)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_mean_std_grad, input, batchMean, batchStd, r, xHat_grad, **tuner_kwargs)
+    batchMean_grad, batchStd_grad = BatchReNorm2dTCFunction.calc_mean_std_grad(input, batchMean, batchStd, r, xHat_grad)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_xHat, input, batchMean, batchStd, r, d, **tuner_kwargs)
+    xHat = BatchReNorm2dTCFunction.calc_xHat(input, batchMean, batchStd, r, d)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_weight_bias_grad, grad_output, xHat, **tuner_kwargs)
+    weight_grad, bias_grad = BatchReNorm2dTCFunction.calc_weight_bias_grad(grad_output, xHat)
+    autotune_with_named_cache(BatchReNorm2dTCFunction.calc_I_grad, input, batchMean, batchStd, r, xHat_grad, batchMean_grad, batchStd_grad, **tuner_kwargs)
+    I_grad = BatchReNorm2dTCFunction.calc_I_grad(input, batchMean, batchStd, r, xHat_grad, batchMean_grad, batchStd_grad)
 
 
 def profile_norm(function, message, *args):
     input, running_mean, running_std, weight, bias, params = generate_data()
     input = Variable(input)
     weight, bias = nn.Parameter(weight), nn.Parameter(bias)
-    iters = 2500
-    prewarm_iters = 100
+    iters = 10000
+    prewarm_iters = 300
 
     for _ in range(prewarm_iters):
         function(input, running_mean, running_std, weight, bias, True, 0.01, 1e-5, *args).sum().backward()
