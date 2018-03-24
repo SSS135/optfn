@@ -34,7 +34,7 @@ def batch_renorm(input, running_mean, running_std, weight=None, bias=None,
 
 
 class BatchReNorm1d(Module):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, rmax=3.0, dmax=5.0, affine=True):
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, rmax=3.0, dmax=5.0):
         super(BatchReNorm1d, self).__init__()
         self.num_features = num_features
         self.affine = affine

@@ -35,7 +35,7 @@ def near_instance_norm(input, running_mean, running_std, weight=None, bias=None,
 
 
 class NearInstanceNorm2d(Module):
-    def __init__(self, num_features, eps=1e-5, momentum=0.01, near_momentum=0.2, affine=True):
+    def __init__(self, num_features, eps=1e-5, momentum=0.01, affine=True, near_momentum=0.3):
         super().__init__()
         self.num_features = num_features
         self.affine = affine

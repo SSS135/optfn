@@ -30,6 +30,7 @@ class CheckpointFunction(Function):
 
     @staticmethod
     def forward(ctx, run_function, *args):
+        print('chkp f')
         ctx.run_function = run_function
         ctx.save_for_backward(*args)
         var_args = wrap_variable(args)
@@ -39,6 +40,7 @@ class CheckpointFunction(Function):
 
     @staticmethod
     def backward(ctx, *grads):
+        print('chkp b')
         # with torch.enable_grad():
         real_inputs = ctx.saved_variables
         # We need to create new Variables to mark this place in the graph.
@@ -58,13 +60,12 @@ class CheckpointFunction(Function):
         outputs = ctx.run_function(*inputs)
         if isinstance(outputs, Variable):
             outputs = (outputs,)
-
         # Some inputs might not need gradients so we filter them out
         # and later return None as grad for those inputs
         filtered_inputs = [i for i in inputs if i.requires_grad]
         if not filtered_inputs:
             return (None,) * (1 + len(inputs))
-        grads = torch.autograd.grad(outputs, filtered_inputs, grads)
+        grads = torch.autograd.grad(outputs, filtered_inputs, grads, only_inputs=False)
 
         # Append None for input grads which don't require grad. The first input
         # is a run_function whose grad is None
