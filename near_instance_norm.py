@@ -20,8 +20,8 @@ def near_instance_norm(input, running_mean, running_std, weight=None, bias=None,
         running_std.lerp_(inst_std.data.view(b, c).mean(0), momentum)
 
     # make mean / var gradients scale independent of near_momentum (though somewhat incorrect)
-    inst_mean.data.mul_(near_momentum)
-    inst_std.data.mul_(near_momentum)
+    # inst_mean.data.mul_(near_momentum)
+    # inst_std.data.mul_(near_momentum)
 
     near_mean = inst_mean.add_(1 - near_momentum, Variable(running_mean.repeat(b)))
     near_std = inst_std.add_(1 - near_momentum, Variable(running_std.repeat(b)))
@@ -35,7 +35,7 @@ def near_instance_norm(input, running_mean, running_std, weight=None, bias=None,
 
 
 class NearInstanceNorm2d(Module):
-    def __init__(self, num_features, eps=1e-5, momentum=0.01, affine=True, near_momentum=0.3):
+    def __init__(self, num_features, eps=1e-5, momentum=0.01, affine=True, near_momentum=0.5):
         super().__init__()
         self.num_features = num_features
         self.affine = affine
