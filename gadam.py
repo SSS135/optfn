@@ -8,7 +8,7 @@ class GAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0,
                  avg_sq_mode='weight', amsgrad=False, weight_decay=0, eps=1e-8):
         """
-        :param avg_sq_mode: 'global' or 'tensor' or 'weight'
+        :param avg_sq_mode: 'global' or 'tensor' or 'weight' or 'output'
         """
         defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, eps=eps, weight_decay=weight_decay)
         self.avg_sq_mode = avg_sq_mode
@@ -83,6 +83,10 @@ class GAdam(Optimizer):
                     exp_avg_sq = state['max_exp_avg_sq'] if amsgrad else state['exp_avg_sq']
                 elif self.avg_sq_mode == 'tensor':
                     exp_avg_sq = (state['max_exp_avg_sq'] if amsgrad else state['exp_avg_sq']).mean()
+                elif self.avg_sq_mode == 'output':
+                    exp_avg_sq = (state['max_exp_avg_sq'] if amsgrad else state['exp_avg_sq'])
+                    exp_avg_sq = exp_avg_sq.view(exp_avg_sq.shape[0], -1).mean(-1)\
+                        .view(exp_avg_sq.shape[0], *((exp_avg_sq.dim() - 1) * [1]))
                 elif self.avg_sq_mode == 'global':
                     exp_avg_sq = global_exp_avg_sq
                 else:
@@ -103,7 +107,7 @@ class GAdam(Optimizer):
                 nesterov = group['nesterov']
                 prev_delta = state['prev_delta']
 
-                if self.avg_sq_mode == 'weight':
+                if self.avg_sq_mode == 'weight' or self.avg_sq_mode == 'output':
                     denom = exp_avg_sq.sqrt().add_(group['eps'])
                 else:
                     denom = math.sqrt(exp_avg_sq) + group['eps']
