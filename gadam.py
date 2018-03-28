@@ -57,8 +57,9 @@ class GAdam(Optimizer):
                 beta1, beta2 = group['betas']
 
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                exp_avg_sq.mul_(beta2).add_(1 - beta2, grad.pow(2).add_(group['eps']).log_())
 
+                assert not amsgrad
                 if amsgrad:
                     torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
                     # if self.avg_sq_mode == 'global':
@@ -101,16 +102,16 @@ class GAdam(Optimizer):
 
                 # Decay the first and second moment running average coefficient
                 exp_avg = exp_avg / bias_correction1
-                exp_avg_sq = exp_avg_sq.add_(group['eps']) / (global_exp_avg_sq + group['eps']) #bias_correction2
+                denom = exp_avg_sq.sub_(global_exp_avg_sq).mul_(0.25).exp_() #bias_correction2
 
                 lr = group['lr']
                 nesterov = group['nesterov']
                 prev_delta = state['prev_delta']
 
-                if self.avg_sq_mode == 'weight' or self.avg_sq_mode == 'output':
-                    denom = exp_avg_sq.sqrt().sqrt()
-                else:
-                    denom = math.sqrt(math.sqrt(exp_avg_sq))
+                # if self.avg_sq_mode == 'weight' or self.avg_sq_mode == 'output':
+                #     denom = exp_avg_sq.sqrt().sqrt()
+                # else:
+                #     denom = math.sqrt(math.sqrt(exp_avg_sq))
 
                 exp_avg = exp_avg.div(denom)
 
