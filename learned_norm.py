@@ -2,10 +2,11 @@ import torch
 from torch.nn import Parameter, Module
 from torch.autograd import Variable
 from torch import nn
+import torch.nn.functional as F
 
 
 class LearnedNorm2d(Module):
-    def __init__(self, num_features, reduction=8, eps=0.05):
+    def __init__(self, num_features, reduction=8, eps=0.01):
         super().__init__()
         self.num_features = num_features
         self.reduction = reduction
@@ -29,14 +30,12 @@ class LearnedNorm2d(Module):
         b, c = input.size(0), input.size(1)
         input = input.contiguous().view(b, c, -1)
 
-        real_mean, real_std = input.mean(-1), input.var(-1).add_(self.eps).sqrt_()
-        net_mean, net_logstd = self.layers(torch.cat([real_mean, real_std.sqrt().log()], 1)).chunk(2, 1)
-        used_mean = real_mean + net_mean
-        used_invstd = real_std.log().add(net_logstd).neg().exp()
+        mean, std = input.mean(-1), input.var(-1).add_(self.eps).sqrt_()
+        weight, bias = self.layers(torch.cat([mean, F.tanh(std.log() / 5)], 1)).chunk(2, 1)
 
-        self.reg_loss = net_logstd.pow(2).mean() + net_mean.pow(2).mean()
+        self.reg_loss = weight.pow(2).mean() + bias.pow(2).mean()
 
-        input = input.sub(used_mean.unsqueeze(-1)).mul_(used_invstd.unsqueeze(-1)).view(src_shape)
+        input = input.sub(mean.unsqueeze(-1)).mul_((1 / std).mul_(weight.add(1)).unsqueeze(-1)).add(bias.unsqueeze(-1)).view(src_shape)
         return input
 
     def __repr__(self):

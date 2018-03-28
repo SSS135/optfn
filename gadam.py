@@ -5,8 +5,8 @@ from torch.optim.optimizer import Optimizer
 
 
 class GAdam(Optimizer):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0,
-                 avg_sq_mode='weight', amsgrad=False, weight_decay=0, eps=1e-8):
+    def __init__(self, params, lr=0.1, betas=(0.9, 0.999), nesterov=0.0,
+                 avg_sq_mode='weight', amsgrad=False, weight_decay=0, eps=1e-6):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight' or 'output'
         """
@@ -25,8 +25,8 @@ class GAdam(Optimizer):
         if closure is not None:
             loss = closure()
 
-        if self.avg_sq_mode == 'global':
-            exp_avg_sq_list = []
+        # if self.avg_sq_mode == 'global':
+        exp_avg_sq_list = []
 
         for group in self.param_groups:
             for p in group['params']:
@@ -61,14 +61,14 @@ class GAdam(Optimizer):
 
                 if amsgrad:
                     torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
-                    if self.avg_sq_mode == 'global':
-                        exp_avg_sq_list.append(max_exp_avg_sq.mean())
+                    # if self.avg_sq_mode == 'global':
+                    exp_avg_sq_list.append(max_exp_avg_sq.mean())
                 else:
-                    if self.avg_sq_mode == 'global':
-                        exp_avg_sq_list.append(exp_avg_sq.mean())
+                    # if self.avg_sq_mode == 'global':
+                    exp_avg_sq_list.append(exp_avg_sq.mean())
 
-        if self.avg_sq_mode == 'global':
-            global_exp_avg_sq = np.mean(exp_avg_sq_list)
+        # if self.avg_sq_mode == 'global':
+        global_exp_avg_sq = np.mean(exp_avg_sq_list)
 
         for group in self.param_groups:
             for p in group['params']:
@@ -87,8 +87,8 @@ class GAdam(Optimizer):
                     exp_avg_sq = (state['max_exp_avg_sq'] if amsgrad else state['exp_avg_sq'])
                     exp_avg_sq = exp_avg_sq.view(exp_avg_sq.shape[0], -1).mean(-1)\
                         .view(exp_avg_sq.shape[0], *((exp_avg_sq.dim() - 1) * [1]))
-                elif self.avg_sq_mode == 'global':
-                    exp_avg_sq = global_exp_avg_sq
+                # elif self.avg_sq_mode == 'global':
+                #     exp_avg_sq = global_exp_avg_sq
                 else:
                     raise ValueError()
 
@@ -97,20 +97,20 @@ class GAdam(Optimizer):
                 state['step'] += 1
 
                 bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
+                # bias_correction2 = 1 - beta2 ** state['step']
 
                 # Decay the first and second moment running average coefficient
                 exp_avg = exp_avg / bias_correction1
-                exp_avg_sq = exp_avg_sq / bias_correction2
+                exp_avg_sq = exp_avg_sq.add_(group['eps']) / (global_exp_avg_sq + group['eps']) #bias_correction2
 
                 lr = group['lr']
                 nesterov = group['nesterov']
                 prev_delta = state['prev_delta']
 
                 if self.avg_sq_mode == 'weight' or self.avg_sq_mode == 'output':
-                    denom = exp_avg_sq.sqrt().add_(group['eps'])
+                    denom = exp_avg_sq.sqrt().sqrt()
                 else:
-                    denom = math.sqrt(exp_avg_sq) + group['eps']
+                    denom = math.sqrt(math.sqrt(exp_avg_sq))
 
                 exp_avg = exp_avg.div(denom)
 
