@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 class LearnedNorm2d(Module):
-    def __init__(self, num_features, reduction=8, eps=0.01):
+    def __init__(self, num_features, reduction=8, eps=1e-5):
         super().__init__()
         self.num_features = num_features
         self.reduction = reduction
@@ -30,13 +30,15 @@ class LearnedNorm2d(Module):
         b, c = input.size(0), input.size(1)
         input = input.contiguous().view(b, c, -1)
 
-        mean, std = input.mean(-1), input.var(-1).add_(self.eps).sqrt_()
-        weight, bias = self.layers(torch.cat([mean, F.tanh(std.log() / 5)], 1)).chunk(2, 1)
+        mean, log_var = input.mean(-1), input.var(-1).add_(self.eps).log_()
+        log_weight, bias = self.layers(torch.cat([mean, F.tanh(log_var / 5)], 1)).chunk(2, 1)
+        inv_std = log_weight.add(-0.5, log_var).exp_()
 
-        self.reg_loss = weight.pow(2).mean() + bias.pow(2).mean()
+        self.reg_loss = log_weight.pow(2).mean()
 
-        input = input.sub(mean.unsqueeze(-1)).mul_((1 / std).mul_(weight.add(1)).unsqueeze(-1)).add(bias.unsqueeze(-1)).view(src_shape)
-        return input
+        normalized = input.sub(mean.unsqueeze(-1)).mul_(inv_std.unsqueeze(-1)).add_(bias.unsqueeze(-1))
+
+        return normalized.view(src_shape)
 
     def __repr__(self):
         return ('{name}({num_features}, eps={eps}, reduction={reduction})'

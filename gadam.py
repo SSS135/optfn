@@ -5,7 +5,7 @@ from torch.optim.optimizer import Optimizer
 
 
 class GAdam(Optimizer):
-    def __init__(self, params, lr=0.1, betas=(0.9, 0.999), nesterov=0.0,
+    def __init__(self, params, lr=0.01, betas=(0.9, 0.999), nesterov=0.0,
                  avg_sq_mode='weight', amsgrad=False, weight_decay=0, eps=1e-6):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight' or 'output'
@@ -98,11 +98,11 @@ class GAdam(Optimizer):
                 state['step'] += 1
 
                 bias_correction1 = 1 - beta1 ** state['step']
-                # bias_correction2 = 1 - beta2 ** state['step']
+                bias_correction2 = 1 - beta2 ** state['step']
 
                 # Decay the first and second moment running average coefficient
                 exp_avg = exp_avg / bias_correction1
-                denom = exp_avg_sq.sub_(global_exp_avg_sq).mul_(0.25).exp_() #bias_correction2
+                denom = exp_avg_sq.mul(-0.25 / bias_correction2).exp_() #bias_correction2
 
                 lr = group['lr']
                 nesterov = group['nesterov']
@@ -113,7 +113,7 @@ class GAdam(Optimizer):
                 # else:
                 #     denom = math.sqrt(math.sqrt(exp_avg_sq))
 
-                exp_avg = exp_avg.div(denom)
+                exp_avg = exp_avg.mul(denom)
 
                 weight_decay = group['weight_decay']
                 if weight_decay != 0:

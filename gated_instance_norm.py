@@ -12,6 +12,7 @@ class GatedInstanceNorm2d(Module):
         self.eps = eps
         self.affine = affine
         self.init_gate = init_gate
+        self.reg_loss = None
         self.gates_mean = nn.Parameter(torch.Tensor(num_features))
         self.gates_std = nn.Parameter(torch.Tensor(num_features))
         if self.affine:
@@ -40,6 +41,8 @@ class GatedInstanceNorm2d(Module):
         src_shape = input.shape
         b, c = input.size(0), input.size(1)
         input = input.contiguous().view(b, c, -1)
+
+        self.reg_loss = 0.5 * self.gates_mean.mean() + 0.5 * self.gates_std.mean()
 
         mean, log_var = input.mean(-1), input.var(-1).add_(self.eps).log_()
 
