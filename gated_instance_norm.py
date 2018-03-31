@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 class GatedInstanceNorm2d(Module):
-    def __init__(self, num_features, eps=1e-5, affine=True, init_gate=1):
+    def __init__(self, num_features, eps=1e-5, affine=True, init_gate=0):
         super().__init__()
         self.num_features = num_features
         self.eps = eps
@@ -24,11 +24,11 @@ class GatedInstanceNorm2d(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.gates_mean.data.fill_(self.init_gate)
-        self.gates_std.data.fill_(self.init_gate)
+        self.gates_mean.data.normal_(self.init_gate, 0.02)
+        self.gates_std.data.normal_(self.init_gate, 0.02)
         if self.affine:
-            self.weight.data.fill_(1)
-            self.bias.data.zero_()
+            self.weight.data.normal_(1, 0.02)
+            self.bias.data.normal_(0, 0.02)
 
     def _check_input_dim(self, input):
         if input.size(1) != self.num_features:
@@ -42,12 +42,12 @@ class GatedInstanceNorm2d(Module):
         b, c = input.size(0), input.size(1)
         input = input.contiguous().view(b, c, -1)
 
-        self.reg_loss = 0.5 * self.gates_mean.mean() + 0.5 * self.gates_std.mean()
+        self.reg_loss = 0.5 * self.gates_mean.pow(2).mean() + 0.5 * self.gates_std.pow(2).mean()
 
         mean, log_var = input.mean(-1), input.var(-1).add_(self.eps).log_()
 
-        std = log_var.mul_(0.5).mul_(self.gates_std.sigmoid()).exp_()
-        mean = mean.mul_(self.gates_mean.sigmoid())
+        std = log_var.mul_(self.gates_std.sigmoid()).exp_()
+        mean = mean.mul_(2).mul_(self.gates_mean.sigmoid())
         normalized = input.sub(mean.unsqueeze(-1)).mul_((self.weight / std).unsqueeze(-1)).add_(self.bias.unsqueeze(-1))
 
         return normalized.view(src_shape)
