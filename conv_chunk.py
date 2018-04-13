@@ -5,6 +5,9 @@ from torch.autograd import Variable
 
 
 class ConvChunk2d(nn.Module):
+    """
+    Split (B, C, IH, IW) feature map to (B, K, K, C, OH, OW)
+    """
     def __init__(self, channels, kernel_size, stride=1, padding=0):
         super().__init__()
         self.channels = channels
@@ -23,7 +26,7 @@ class ConvChunk2d(nn.Module):
         assert input.shape[1] == self.channels
         x = F.conv2d(input, Variable(self.weight), bias=None,
                      stride=self.stride, padding=self.padding, groups=self.channels)
-        x = x.view(x.shape[0], self.kernel_size, self.kernel_size, self.channels, -1)
-        x = x.permute(0, 4, 3, 1, 2).contiguous()
-        x = x.view(-1, *x.shape[2:])
+        x = x.view(x.shape[0], self.kernel_size, self.kernel_size, self.channels, *x.shape[-2:])
+        # x = x.permute(0, 4, 3, 1, 2).contiguous()
+        # x = x.view(-1, *x.shape[2:])
         return x
