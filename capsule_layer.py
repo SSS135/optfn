@@ -22,6 +22,10 @@ class CapsuleLayer(nn.Module):
         scale = squared_norm / (1 + squared_norm)
         return scale * tensor / squared_norm.sqrt()
 
+    def cluster_weight(self, tensor, dim=-1):
+        squared_norm = (tensor ** 2).sum(dim=dim, keepdim=True)
+        return 1 / squared_norm.add(1e-4).sqrt()
+
     def forward(self, input):
         # (B, K, K, C, OH, OW)
         chunks = self.chunk(input)
@@ -37,16 +41,11 @@ class CapsuleLayer(nn.Module):
         # x_hat = x_hat.permute(0, 3, 1, 2)
 
         # (B, OH, OW, K * K, NC, 1)
-        logits = Variable(priors.data.new(*priors.shape[:-1], 1).zero_())
+        outputs = priors.mean(-3, keepdim=True)
         for i in range(self.num_iterations):
-            probs = F.softmax(logits, dim=3)
-            # (B, OH, OW, 1, NC, CS)
-            outputs = self.squash((probs * priors).sum(dim=3, keepdim=True))
-
-            if i != self.num_iterations - 1:
-                # (B, OH, OW, K * K, NC, 1)
-                delta_logits = (priors * outputs).sum(dim=-1, keepdim=True)
-                logits = logits + delta_logits
+            cw = self.cluster_weight(outputs - priors, -1)
+            cw = cw / cw.sum(-3, keepdim=True)
+            outputs = (priors * cw).sum(-3, keepdim=True)
 
         # (B, OH, OW, NC * CS)
         outputs = outputs.view(*outputs.shape[:3], self.num_capsules * self.caps_channels)
