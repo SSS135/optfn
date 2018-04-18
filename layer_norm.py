@@ -17,12 +17,12 @@ class _LayerNorm(_BatchNorm):
         input_reshaped = input.transpose(0, 1).contiguous().view(c, -1)
 
         # Repeat stored stats and affine transform params
-        running_mean = self.running_mean.repeat(input.shape[1])
-        running_var = self.running_var.repeat(input.shape[1])
+        running_mean = self.running_mean.repeat(input_reshaped.shape[1])
+        running_var = self.running_var.repeat(input_reshaped.shape[1])
 
         out = F.batch_norm(
             input_reshaped, running_mean, running_var, None, None,
-            not self.use_running_stats, self.momentum, self.eps)
+            True, self.momentum, self.eps)
 
         out = out.view(c, b, -1).transpose(0, 1)
         out = out.mul(self.weight.unsqueeze(-1)).add_(self.bias.unsqueeze(-1))

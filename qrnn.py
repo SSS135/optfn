@@ -4,28 +4,29 @@ import torch
 import torch.nn.functional
 from torch import nn
 from torch.autograd import Variable
-# from torchqrnn.forget_mult import ForgetMult
+from torchqrnn.forget_mult import ForgetMult
 from .sigmoid_pow import SigmoidPow, sigmoid_pow
+from .layer_norm import LayerNorm1d
 
 
-class ForgetMult(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, f, x, hidden_init=None, use_cuda=False):
-        result = []
-        ###
-        forgets = f.split(1, dim=0)
-        prev_h = hidden_init
-        for i, h in enumerate((f * x).split(1, dim=0)):
-            if prev_h is not None: h = h + (1 - forgets[i]) * prev_h
-            # h is (1, batch, hidden) when it needs to be (batch_hidden)
-            # Calling squeeze will result in badness if batch size is 1
-            h = h.view(h.size()[1:])
-            result.append(h)
-            prev_h = h
-        ###
-        return torch.stack(result)
+# class ForgetMult(torch.nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#
+#     def forward(self, f, x, hidden_init=None, use_cuda=False):
+#         result = []
+#         ###
+#         forgets = f.split(1, dim=0)
+#         prev_h = hidden_init
+#         for i, h in enumerate((f * x).split(1, dim=0)):
+#             if prev_h is not None: h = h + (1 - forgets[i]) * prev_h
+#             # h is (1, batch, hidden) when it needs to be (batch_hidden)
+#             # Calling squeeze will result in badness if batch size is 1
+#             h = h.view(h.size()[1:])
+#             result.append(h)
+#             prev_h = h
+#         ###
+#         return torch.stack(result)
 
 
 class QRNNLayer(nn.Module):
@@ -64,6 +65,7 @@ class QRNNLayer(nn.Module):
 
         # One large matmul with concat is faster than N small matmuls and no concat
         self.linear = nn.Linear(self.window * self.input_size, 3 * self.hidden_size if self.output_gate else 2 * self.hidden_size)
+        self.layer_norm = LayerNorm1d(self.hidden_size)
 
     def reset(self):
         # If you are saving the previous value of x, you should call this when starting with a new state
@@ -96,7 +98,7 @@ class QRNNLayer(nn.Module):
             Y = Y.view(seq_len, batch_size, 2 * self.hidden_size)
             Z, F = Y.chunk(2, dim=2)
         ###
-        Z = torch.nn.functional.elu(Z)
+        # Z = torch.nn.functional.elu(Z)
         F = sigmoid_pow(F, 2)
 
         # If zoneout is specified, we perform dropout on the forget gates in F
@@ -126,6 +128,8 @@ class QRNNLayer(nn.Module):
             H = torch.nn.functional.sigmoid(O) * C
         else:
             H = C
+
+        H = torch.nn.functional.leaky_relu(self.layer_norm(H.view(-1, *H.shape[2:])).view_as(H), 0.1)
 
         # In an optimal world we may want to backprop to x_{t-1} but ...
         if self.window > 1 and self.save_prev_x:
@@ -198,7 +202,7 @@ class QRNN(torch.nn.Module):
 class DenseQRNN(torch.nn.Module):
     def __init__(self, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False, layers=None, **kwargs):
+                 dropout=0, bidirectional=False, layers=None, dense_output=False, **kwargs):
         assert bidirectional == False, 'Bidirectional QRNN is not yet supported'
         assert batch_first == False, 'Batch first mode is not yet supported'
         assert bias == True, 'Removing underlying bias is not yet supported'
@@ -217,6 +221,7 @@ class DenseQRNN(torch.nn.Module):
         self.batch_first = batch_first
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.dense_output = dense_output
 
     def reset(self):
         r'''If your convolutional window is greater than 1, you must reset at the beginning of each new sequence'''
@@ -235,4 +240,4 @@ class DenseQRNN(torch.nn.Module):
 
         next_hidden = torch.cat(next_hidden, 0).view(self.num_layers, *next_hidden[0].size()[-2:])
 
-        return new_input, next_hidden
+        return input if self.dense_output else new_input, next_hidden
