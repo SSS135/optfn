@@ -7,6 +7,7 @@ from torch.autograd import Variable
 from torchqrnn.forget_mult import ForgetMult
 from .sigmoid_pow import SigmoidPow, sigmoid_pow
 from .layer_norm import LayerNorm1d
+from optfn.swish import swish
 
 
 # class ForgetMult(torch.nn.Module):
@@ -129,7 +130,7 @@ class QRNNLayer(nn.Module):
         else:
             H = C
 
-        H = torch.nn.functional.leaky_relu(self.layer_norm(H.view(-1, *H.shape[2:])).view_as(H), 0.1)
+        H = torch.nn.functional.relu(self.layer_norm(H.view(-1, *H.shape[2:])).view_as(H))
 
         # In an optimal world we may want to backprop to x_{t-1} but ...
         if self.window > 1 and self.save_prev_x:
