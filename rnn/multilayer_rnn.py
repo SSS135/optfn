@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mylib.optfn import LayerNorm1d, layer_norm_1d
+from optfn.layer_norm import LayerNorm1d
 
 
 class MultilayerRNNCell(nn.Module):
