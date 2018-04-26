@@ -7,7 +7,7 @@ from torch.nn.modules.batchnorm import _BatchNorm
 
 
 class _GroupNorm(_BatchNorm):
-    def __init__(self, num_features, groups, eps=1e-5, affine=False):
+    def __init__(self, num_features, groups, eps=1e-5, affine=True):
         super().__init__(num_features, eps, 0.1, affine)
         assert num_features % groups == 0, (num_features, groups)
         self.groups = groups

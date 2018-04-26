@@ -6,8 +6,10 @@ from torch import nn
 from torch.autograd import Variable
 from torchqrnn.forget_mult import ForgetMult
 from .sigmoid_pow import SigmoidPow, sigmoid_pow
+from .group_norm import GroupNorm1d
 from .layer_norm import LayerNorm1d
 from optfn.swish import swish
+from .hard_sigmoid import hard_sigmoid
 
 
 # class ForgetMult(torch.nn.Module):
@@ -51,7 +53,7 @@ class QRNNLayer(nn.Module):
         - h_n (batch, hidden_size): tensor containing the hidden state for t=seq_len
     """
 
-    def __init__(self, input_size, hidden_size=None, save_prev_x=False, zoneout=0, window=1, output_gate=True, use_cuda=True):
+    def __init__(self, input_size, hidden_size=None, save_prev_x=False, zoneout=0, window=1, output_gate=True, use_cuda=True, layer_norm=False):
         super(QRNNLayer, self).__init__()
 
         assert window in [1, 2], "This QRNN implementation currently only handles convolutional window of size 1 or size 2"
@@ -65,8 +67,13 @@ class QRNNLayer(nn.Module):
         self.use_cuda = use_cuda
 
         # One large matmul with concat is faster than N small matmuls and no concat
-        self.linear = nn.Linear(self.window * self.input_size, 3 * self.hidden_size if self.output_gate else 2 * self.hidden_size)
-        self.layer_norm = LayerNorm1d(self.hidden_size)
+        self.linear = nn.Linear(self.window * self.input_size,
+                                3 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
+                                bias=not layer_norm)
+        if layer_norm:
+            self.layer_norm = LayerNorm1d(self.hidden_size)
+        else:
+            self.layer_norm = None
 
     def reset(self):
         # If you are saving the previous value of x, you should call this when starting with a new state
@@ -126,11 +133,13 @@ class QRNNLayer(nn.Module):
 
         # Apply (potentially optional) output gate
         if self.output_gate:
-            H = torch.nn.functional.sigmoid(O) * C
+            H = O.sigmoid() * C
         else:
             H = C
 
-        H = torch.nn.functional.relu(self.layer_norm(H.view(-1, *H.shape[2:])).view_as(H))
+        if self.layer_norm is not None:
+            H = self.layer_norm(H.view(-1, H.shape[2])).view_as(H)
+        H = torch.nn.functional.relu(H)
 
         # In an optimal world we may want to backprop to x_{t-1} but ...
         if self.window > 1 and self.save_prev_x:
