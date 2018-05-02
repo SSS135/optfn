@@ -8,6 +8,7 @@ from torchqrnn.forget_mult import ForgetMult
 from .sigmoid_pow import SigmoidPow, sigmoid_pow
 from optfn.swish import swish
 from .hard_sigmoid import hard_sigmoid
+from optfn.drelu import drelu
 
 
 # class ForgetMult(torch.nn.Module):
@@ -66,7 +67,7 @@ class QRNNLayer(nn.Module):
 
         # One large matmul with concat is faster than N small matmuls and no concat
         self.linear = nn.Linear(self.window * self.input_size,
-                                3 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
+                                4 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
                                 bias=not layer_norm)
         if layer_norm:
             self.layer_norm = nn.GroupNorm(1, self.hidden_size)
@@ -98,14 +99,15 @@ class QRNNLayer(nn.Module):
         Y = self.linear(source)
         # Convert the tensor back to (batch, seq_len, len([Z, F, O]) * hidden_size)
         if self.output_gate:
-            Y = Y.view(seq_len, batch_size, 3 * self.hidden_size)
-            Z, F, O = Y.chunk(3, dim=2)
+            Y = Y.view(seq_len, batch_size, 4 * self.hidden_size)
+            Z, Y = Y.chunk(2, dim=2)
+            F, O = Y.chunk(2, dim=2)
         else:
             Y = Y.view(seq_len, batch_size, 2 * self.hidden_size)
             Z, F = Y.chunk(2, dim=2)
         ###
-        # Z = torch.nn.functional.elu(Z)
-        F = sigmoid_pow(F, 2)
+        Z = drelu(Z, dim=2)
+        F = F.sigmoid()
 
         # If zoneout is specified, we perform dropout on the forget gates in F
         # If an element of F is zero, that means the corresponding neuron keeps the old value
@@ -127,7 +129,7 @@ class QRNNLayer(nn.Module):
 
         # Forget Mult
         # For testing QRNN without ForgetMult CUDA kernel, C = Z * F may be useful
-        C = ForgetMult()(F, Z, hidden, use_cuda=self.use_cuda)
+        C = ForgetMult()(F, Z, hidden, use_cuda=self.use_cuda and F.is_cuda)
 
         # Apply (potentially optional) output gate
         if self.output_gate:
@@ -135,9 +137,9 @@ class QRNNLayer(nn.Module):
         else:
             H = C
 
-        if self.layer_norm is not None:
-            H = self.layer_norm(H.view(-1, H.shape[2])).view_as(H)
-        H = torch.nn.functional.relu(H)
+        # if self.layer_norm is not None:
+        #     H = self.layer_norm(H.view(-1, H.shape[2])).view_as(H)
+        # H = torch.nn.functional.relu(H)
 
         # In an optimal world we may want to backprop to x_{t-1} but ...
         if self.window > 1 and self.save_prev_x:
