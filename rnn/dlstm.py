@@ -1,7 +1,6 @@
 import torch.nn as nn
 from torch.autograd import Variable
 import torch
-from optfn.layer_norm import LayerNorm1d
 from optfn.sigmoid_pow import sigmoid_pow
 from optfn.swish import Swish
 
@@ -20,7 +19,7 @@ class DLSTM(nn.Module):
             out_features = hidden_size * 3 if layer_idx == num_layers - 1 else hidden_size
             layers.append(nn.Linear(in_features, out_features, bias=not layer_norm))
             if layer_norm:
-                layers.append(LayerNorm1d(out_features, affine=True))
+                layers.append(nn.GroupNorm(1, out_features))
             if not last_layer:
                 layers.append(activation())
         self.net = nn.Sequential(*layers)

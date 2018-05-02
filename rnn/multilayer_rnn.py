@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from optfn.layer_norm import LayerNorm1d
 
 
 class MultilayerRNNCell(nn.Module):
@@ -16,7 +15,7 @@ class MultilayerRNNCell(nn.Module):
         self.linears = nn.ModuleList([nn.Linear(
             input_size + 2 * hidden_size if i == 0 else hidden_size,
             hidden_size if i + 1 != hidden_layers else 3 * hidden_size) for i in range(hidden_layers)])
-        self.cx_ln_in, self.cx_ln_out = LayerNorm1d(hidden_size), LayerNorm1d(hidden_size)
+        self.cx_ln_in, self.cx_ln_out = nn.GroupNorm(1, hidden_size), nn.GroupNorm(1, hidden_size)
 
     def forward(self, input, hidden):
         hx, cx = hidden

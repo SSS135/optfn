@@ -6,8 +6,6 @@ from torch import nn
 from torch.autograd import Variable
 from torchqrnn.forget_mult import ForgetMult
 from .sigmoid_pow import SigmoidPow, sigmoid_pow
-from .group_norm import GroupNorm1d
-from .layer_norm import LayerNorm1d
 from optfn.swish import swish
 from .hard_sigmoid import hard_sigmoid
 
@@ -71,7 +69,7 @@ class QRNNLayer(nn.Module):
                                 3 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
                                 bias=not layer_norm)
         if layer_norm:
-            self.layer_norm = LayerNorm1d(self.hidden_size)
+            self.layer_norm = nn.GroupNorm(1, self.hidden_size)
         else:
             self.layer_norm = None
 
