@@ -11,7 +11,7 @@ class GradRunningNorm(nn.Module):
         self.momentum = momentum
         self.weight = weight
         self.register_buffer('avg_sq', None)
-        self.avg_sq = torch.zeros(1)
+        self.norm = torch.tensor(0)
         self.step = 0
         self.var_clone = VariableClone()
         self.var_clone.register_backward_hook(self.backward_hook)
@@ -19,16 +19,16 @@ class GradRunningNorm(nn.Module):
     def backward_hook(self, module, grad_input, grad_output):
         assert len(grad_input) == 1, grad_input
         grad_input, = grad_input
-        self.avg_sq += (1 - self.momentum) * (grad_input.data.pow(2).mean() - self.avg_sq)
+        self.norm.lerp_(grad_input.detach().pow(2).sum(), 1 - self.momentum)
         self.step += 1
         bias_correction = 1 - self.momentum ** self.step
-        std = Variable(self.avg_sq.div(bias_correction).add_(1e-8).sqrt_())
-        return self.weight * grad_input / std,
+        norm = (self.norm / bias_correction).sqrt()
+        return self.weight * grad_input / norm,
 
     def forward(self, input):
-        return self.var_clone(input)
+        return input.clone()
 
 
 class VariableClone(nn.Module):
     def forward(self, input):
-        return input + 0
+        return input.clone()

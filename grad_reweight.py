@@ -10,7 +10,8 @@ class GradReweightFunction(torch.autograd.Function):
     def forward(ctx, x, batch_weights):
         assert batch_weights.dim() == 1
         ctx.save_for_backward(batch_weights)
-        return x.clone()
+        ctx.mark_dirty(x)
+        return x
 
     @staticmethod
     def backward(ctx, grad_output):
