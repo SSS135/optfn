@@ -52,7 +52,7 @@ class QRNNLayer(nn.Module):
         - h_n (batch, hidden_size): tensor containing the hidden state for t=seq_len
     """
 
-    def __init__(self, input_size, hidden_size=None, save_prev_x=False, zoneout=0, window=1, output_gate=True, use_cuda=True, layer_norm=False):
+    def __init__(self, input_size, hidden_size=None, save_prev_x=False, zoneout=0, window=1, output_gate=True, use_cuda=True, norm=None):
         super(QRNNLayer, self).__init__()
 
         assert window in [1, 2], "This QRNN implementation currently only handles convolutional window of size 1 or size 2"
@@ -68,11 +68,16 @@ class QRNNLayer(nn.Module):
         # One large matmul with concat is faster than N small matmuls and no concat
         self.linear = nn.Linear(self.window * self.input_size,
                                 4 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
-                                bias=not layer_norm)
-        if layer_norm:
-            self.layer_norm = nn.GroupNorm(1, self.hidden_size)
+                                bias=norm is None)
+        if norm == 'group':
+            self.norm = nn.GroupNorm(16, hidden_size)
+        if norm == 'layer':
+            self.norm = nn.LayerNorm(hidden_size)
+        if norm == 'batch':
+            self.norm = nn.BatchNorm1d(hidden_size)
         else:
-            self.layer_norm = None
+            assert norm is None
+            self.norm = None
 
     def reset(self):
         # If you are saving the previous value of x, you should call this when starting with a new state
@@ -137,8 +142,8 @@ class QRNNLayer(nn.Module):
         else:
             H = C
 
-        # if self.layer_norm is not None:
-        #     H = self.layer_norm(H.view(-1, H.shape[2])).view_as(H)
+        if self.norm is not None:
+            H = self.norm(H.view(-1, H.shape[2])).view_as(H)
         # H = torch.nn.functional.relu(H)
 
         # In an optimal world we may want to backprop to x_{t-1} but ...

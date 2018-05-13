@@ -10,8 +10,7 @@ class OptClipFunction(torch.autograd.Function):
     def forward(ctx, x, pivot, clip):
         assert x.shape == pivot.shape and clip.dim() == 0
         ctx.save_for_backward(x, pivot, clip)
-        ctx.mark_dirty(x)
-        return x
+        return x.clone()
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -19,7 +18,7 @@ class OptClipFunction(torch.autograd.Function):
         grad_output = grad_output.clone()
         diff = x - pivot
         zero_mask = (diff > clip) & (grad_output < 0) | (diff < -clip) & (grad_output > 0)
-        grad_output[zero_mask] *= -0.1
+        grad_output[zero_mask] = 0
         return grad_output, None, None
 
 
