@@ -14,3 +14,8 @@ class ResidualSequential(nn.Sequential):
         for module in self._modules.values():
             input = input + module(input)
         return input
+
+
+class ResidualBlock(nn.Sequential):
+    def forward(self, input):
+        return input + super().forward(input)
