@@ -9,6 +9,9 @@ from .sigmoid_pow import SigmoidPow, sigmoid_pow
 from optfn.swish import swish
 from .hard_sigmoid import hard_sigmoid
 from optfn.drelu import drelu
+from optfn.spectral_norm import spectral_norm
+from torch.nn.utils.weight_norm import weight_norm
+from torch.nn.init import xavier_uniform_
 
 
 # class ForgetMult(torch.nn.Module):
@@ -69,15 +72,20 @@ class QRNNLayer(nn.Module):
         self.linear = nn.Linear(self.window * self.input_size,
                                 4 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
                                 bias=norm is None)
-        if norm == 'group':
-            self.norm = nn.GroupNorm(16, hidden_size)
-        if norm == 'layer':
-            self.norm = nn.LayerNorm(hidden_size)
-        if norm == 'batch':
-            self.norm = nn.BatchNorm1d(hidden_size)
-        else:
-            assert norm is None
-            self.norm = None
+        xavier_uniform_(self.linear.weight.data)
+
+        self.norm = None
+        if norm is not None:
+            if 'group' in norm:
+                self.norm = nn.GroupNorm(16, hidden_size)
+            elif 'layer' in norm:
+                self.norm = nn.LayerNorm(hidden_size)
+            elif 'batch' in norm:
+                self.norm = nn.BatchNorm1d(hidden_size)
+            elif 'spectral' in norm:
+                self.linear = spectral_norm(self.linear)
+            elif 'weight' in norm:
+                self.linear = weight_norm(self.linear)
 
     def reset(self):
         # If you are saving the previous value of x, you should call this when starting with a new state

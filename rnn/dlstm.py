@@ -17,7 +17,7 @@ class DLSTM(nn.Module):
         for layer_idx in range(num_layers):
             last_layer = layer_idx == num_layers - 1
             in_features = hidden_size + input_size if layer_idx == 0 else hidden_size
-            out_features = hidden_size * 4 if last_layer else hidden_size
+            out_features = hidden_size * 5 if last_layer else hidden_size
             layers.append(nn.Linear(in_features, out_features, bias=not layer_norm))
             if layer_norm:
                 layers.append(nn.LayerNorm(out_features))
@@ -36,14 +36,17 @@ class DLSTM(nn.Module):
         outputs = []
         for step, x in enumerate(input):
             x = torch.cat([x, cell_state], 1)
-            new_cx, tail = self.net(x).chunk(2, 1)
-            new_hx, forget = tail.chunk(2, 1)
-            forget = forget.sigmoid()
-            retain = 1 - forget
+            net_out = self.net(x)
+            new_cx = net_out[:, :self.hidden_size * 2]
+            new_hx, forget_gate, input_gate = net_out[:, self.hidden_size * 2:].chunk(3, 1)
+            forget_gate = forget_gate.sigmoid()
+            input_gate = input_gate.sigmoid()
             if reset_flags is not None:
-                retain *= keep_flags[step].unsqueeze(-1)
+                keep = keep_flags[step].unsqueeze(-1)
+                input_gate *= keep
+                forget_gate *= 1 - keep
             new_hx = self.hx_activation(new_hx)
             new_cx = drelu(new_cx)
-            cell_state = (1 - retain) * new_cx + retain * cell_state
+            cell_state = input_gate * new_cx + forget_gate * cell_state
             outputs.append(new_hx)
         return torch.stack(outputs, 0), cell_state.unsqueeze(0)
