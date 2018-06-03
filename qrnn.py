@@ -71,17 +71,18 @@ class QRNNLayer(nn.Module):
 
         # One large matmul with concat is faster than N small matmuls and no concat
         self.linear = nn.Linear(self.window * self.input_size,
-                                4 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
+                                4 * self.hidden_size if self.output_gate else 3 * self.hidden_size,
                                 bias=norm is None)
 
         self.norm = None
         if norm is not None:
+            lin_nf = 4 * self.hidden_size if self.output_gate else 3 * self.hidden_size
             if 'group' in norm:
-                self.norm = nn.GroupNorm(16, hidden_size)
+                self.norm = nn.GroupNorm(16, lin_nf)
             elif 'layer' in norm:
-                self.norm = nn.LayerNorm(hidden_size)
+                self.norm = nn.LayerNorm(lin_nf)
             elif 'batch' in norm:
-                self.norm = nn.BatchNorm1d(hidden_size)
+                self.norm = nn.BatchNorm1d(lin_nf)
 
     def reset(self):
         # If you are saving the previous value of x, you should call this when starting with a new state
@@ -115,7 +116,7 @@ class QRNNLayer(nn.Module):
             F, O = Y.chunk(2, dim=2)
         else:
             Y = Y.view(seq_len, batch_size, 2 * self.hidden_size)
-            Z, F = Y.chunk(2, dim=2)
+            Z, F = Y[..., :self.hidden_size * 2], Y[..., self.hidden_size * 2:]
         ###
         Z = drelu(Z, dim=2)
         F = F.sigmoid()
