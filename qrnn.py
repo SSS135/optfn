@@ -12,6 +12,7 @@ from optfn.drelu import drelu
 from optfn.spectral_norm import spectral_norm
 from torch.nn.utils.weight_norm import weight_norm
 from torch.nn.init import xavier_uniform_
+from optfn.weight_rescale import weight_rescale
 
 
 # class ForgetMult(torch.nn.Module):
@@ -72,7 +73,6 @@ class QRNNLayer(nn.Module):
         self.linear = nn.Linear(self.window * self.input_size,
                                 4 * self.hidden_size if self.output_gate else 2 * self.hidden_size,
                                 bias=norm is None)
-        xavier_uniform_(self.linear.weight.data)
 
         self.norm = None
         if norm is not None:
@@ -82,10 +82,6 @@ class QRNNLayer(nn.Module):
                 self.norm = nn.LayerNorm(hidden_size)
             elif 'batch' in norm:
                 self.norm = nn.BatchNorm1d(hidden_size)
-            elif 'spectral' in norm:
-                self.linear = spectral_norm(self.linear)
-            elif 'weight' in norm:
-                self.linear = weight_norm(self.linear)
 
     def reset(self):
         # If you are saving the previous value of x, you should call this when starting with a new state
@@ -110,6 +106,8 @@ class QRNNLayer(nn.Module):
 
         # Matrix multiplication for the three outputs: Z, F, O
         Y = self.linear(source)
+        if self.norm is not None:
+            Y = self.norm(Y.view(-1, Y.shape[2])).view_as(Y)
         # Convert the tensor back to (batch, seq_len, len([Z, F, O]) * hidden_size)
         if self.output_gate:
             Y = Y.view(seq_len, batch_size, 4 * self.hidden_size)
@@ -150,8 +148,6 @@ class QRNNLayer(nn.Module):
         else:
             H = C
 
-        if self.norm is not None:
-            H = self.norm(H.view(-1, H.shape[2])).view_as(H)
         # H = torch.nn.functional.relu(H)
 
         # In an optimal world we may want to backprop to x_{t-1} but ...
