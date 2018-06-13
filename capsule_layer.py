@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from .conv_chunk import ConvChunk2d
+from .tile_2d import Tile2d
 
 
 class CapsuleLayer(nn.Module):
@@ -13,7 +13,7 @@ class CapsuleLayer(nn.Module):
         self.num_capsules = num_capsules
         self.caps_channels = caps_channels
         self.num_iterations = num_iterations
-        self.chunk = ConvChunk2d(in_channels, kernel_size, stride, padding)
+        self.chunk = Tile2d(in_channels, kernel_size, stride, padding)
         self.weight = nn.Parameter(torch.randn(1, 1, 1, kernel_size, kernel_size, in_channels, num_capsules * caps_channels))
         self.bias = nn.Parameter(torch.zeros(1, 1, 1, kernel_size, kernel_size, 1, num_capsules * caps_channels))
 
