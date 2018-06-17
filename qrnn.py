@@ -78,7 +78,7 @@ class QRNNLayer(nn.Module):
         if norm is not None:
             lin_nf = 4 * self.hidden_size if self.output_gate else 3 * self.hidden_size
             if 'group' in norm:
-                self.norm = nn.GroupNorm(16, lin_nf)
+                self.norm = nn.GroupNorm(32, lin_nf)
             elif 'layer' in norm:
                 self.norm = nn.LayerNorm(lin_nf)
             elif 'batch' in norm:
