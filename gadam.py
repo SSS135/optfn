@@ -44,7 +44,7 @@ class GAdam(Optimizer):
                     state['step'] = 0
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p.data)
-                    state['prev_delta'] = torch.zeros_like(p.data)
+                    state['prev_shift'] = torch.zeros_like(p.data)
                     # Exponential moving average of squared gradient values
                     state['exp_avg_sq'] = torch.zeros_like(p.data)
                     if amsgrad:
@@ -105,7 +105,7 @@ class GAdam(Optimizer):
 
                 lr = group['lr']
                 nesterov = group['nesterov']
-                prev_delta = state['prev_delta']
+                prev_shift = state['prev_shift']
 
                 if self.avg_sq_mode == 'weight' or self.avg_sq_mode == 'output':
                     denom = exp_avg_sq.sqrt().add_(group['eps'])
@@ -119,11 +119,12 @@ class GAdam(Optimizer):
                     exp_avg.add_(weight_decay, p.data)
 
                 if nesterov != 0:
-                    grad = exp_avg.add(-nesterov, prev_delta)
-                    prev_delta.copy_(exp_avg)
+                    p.data.sub_(nesterov, prev_shift)
+                    cur_shift = (-lr / (1 - nesterov)) * exp_avg
+                    prev_shift.copy_(cur_shift)
+                    p.data.add_(cur_shift)
                 else:
                     grad = exp_avg
-
-                p.data.add_(-lr / (1 - nesterov), grad)
+                    p.data.add_(-lr, grad)
 
         return loss
