@@ -18,7 +18,7 @@ def drrelu(x, neg_min=-0.3, neg_max=0.3, pos_min=0.95, pos_max=1.05, inplace=Fal
 
 
 class DRReLU(nn.Module):
-    def __init__(self, neg_min, neg_max, pos_min, pos_max, inplace=False):
+    def __init__(self, neg_min=-0.3, neg_max=0.3, pos_min=0.95, pos_max=1.05, inplace=False):
         super().__init__()
         self.neg_min = neg_min
         self.neg_max = neg_max

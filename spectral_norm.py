@@ -9,13 +9,14 @@ import torch.nn as nn
 
 class SpectralNorm(object):
 
-    def __init__(self, name='weight', n_power_iterations=1, eps=1e-12):
+    def __init__(self, name='weight', n_power_iterations=1, eps=1e-12, auto_update_u=True):
         self.name = name
         if n_power_iterations <= 0:
             raise ValueError('Expected n_power_iterations to be positive, but '
                              'got n_power_iterations={}'.format(n_power_iterations))
         self.n_power_iterations = n_power_iterations
         self.eps = eps
+        self.auto_update_u = auto_update_u
 
     def compute_weight(self, module):
         weight = getattr(module, self.name + '_orig')
@@ -44,15 +45,16 @@ class SpectralNorm(object):
     def __call__(self, module, inputs):
         weight, u = self.compute_weight(module)
         setattr(module, self.name, weight)
-        # setattr(module, self.name + '_u', u)
+        if self.auto_update_u:
+            setattr(module, self.name + '_u', u)
 
     def update_u(self, module):
         weight, u = self.compute_weight(module)
         setattr(module, self.name + '_u', u)
 
     @staticmethod
-    def apply(module, name, n_power_iterations, eps):
-        fn = SpectralNorm(name, n_power_iterations, eps)
+    def apply(module, name, n_power_iterations, eps, auto_update_u):
+        fn = SpectralNorm(name, n_power_iterations, eps, auto_update_u)
         weight = module._parameters[name]
         height = weight.size(0)
 
@@ -72,7 +74,7 @@ class SpectralNorm(object):
         return fn
 
 
-def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
+def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, auto_update_u=True):
     r"""Applies spectral normalization to a parameter in the given module.
     .. math::
          \mathbf{W} &= \dfrac{\mathbf{W}}{\sigma(\mathbf{W})} \\
@@ -101,7 +103,7 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
         >>> m.weight_u.size()
         torch.Size([20])
     """
-    SpectralNorm.apply(module, name, n_power_iterations, eps)
+    SpectralNorm.apply(module, name, n_power_iterations, eps, auto_update_u)
     return module
 
 
