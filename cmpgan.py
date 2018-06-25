@@ -3,13 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from optfn.spectral_norm import spectral_norm
 from optfn.drrelu import DRReLU
+from optfn.multihead_attention import AdditiveMultiheadAttention2d
 
 
 def spectral_init(module, gain=1):
     nn.init.kaiming_uniform_(module.weight, gain)
     if module.bias is not None:
         module.bias.data.zero_()
-    return module# spectral_norm(module)
+    return spectral_norm(module)
 
 
 class GanD(nn.Module):
@@ -23,6 +24,7 @@ class GanD(nn.Module):
             spectral_init(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)),
             nn.GroupNorm(ng * 2, nf * 2),
             nn.LeakyReLU(0.2, True),
+            AdditiveMultiheadAttention2d(nf * 2, 1, nf * 2 // 8, normalize=False),
             spectral_init(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False)),
             nn.GroupNorm(ng * 4, nf * 4),
             nn.LeakyReLU(0.2, True),
@@ -34,6 +36,33 @@ class GanD(nn.Module):
 
 
 class GanCmpD(nn.Module):
+    def __init__(self, nc, nf):
+        super().__init__()
+        ng = 2
+        self.feature_net = nn.Sequential(
+            spectral_init(nn.Conv2d(nc * 2, nf, 4, 2, 1)),
+            # nn.GroupNorm(ng, nf),
+            nn.LeakyReLU(0.2, True),
+            spectral_init(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)),
+            nn.GroupNorm(ng * 2, nf * 2),
+            nn.LeakyReLU(0.2, True),
+            AdditiveMultiheadAttention2d(nf * 2, 1, nf * 2 // 8, normalize=False),
+            spectral_init(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False)),
+            nn.GroupNorm(ng * 4, nf * 4),
+            nn.LeakyReLU(0.2, True),
+            spectral_init(nn.Conv2d(nf * 4, 1, 4, 1, 0, bias=False)),
+        )
+
+    def forward(self, left, right):
+        comb = torch.cat([
+            torch.cat([left, right], 1),
+            torch.cat([right, left], 1),
+        ], 0)
+        cmp_a, cmp_b = self.feature_net(comb).view(-1).chunk(2, 0)
+        return 0.5 * (cmp_a - cmp_b)
+
+
+class GanCmpDOld(nn.Module):
     def __init__(self, nc, nf):
         super().__init__()
         ng = 2
@@ -83,6 +112,7 @@ class GanG(nn.Module):
             spectral_init(nn.ConvTranspose2d(nf * 4, nf * 2, 4, 2, 1, bias=False)),
             nn.GroupNorm(ng * 2, nf * 2),
             nn.ReLU(True),
+            AdditiveMultiheadAttention2d(nf * 2, 1, nf * 2 // 8, normalize=False),
             spectral_init(nn.ConvTranspose2d(nf * 2, nf, 4, 2, 1, bias=False)),
             nn.GroupNorm(ng, nf),
             nn.ReLU(True),
