@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from optfn.spectral_norm import spectral_norm
 from optfn.drrelu import DRReLU
 from optfn.multihead_attention import AdditiveMultiheadAttention2d
+from optfn.group_norm_unscaled import GroupNormUnscaled
 
 
 def spectral_init(module, gain=1):
@@ -19,14 +20,14 @@ class GanD(nn.Module):
         ng = 2
         self.net = nn.Sequential(
             spectral_init(nn.Conv2d(nc, nf, 4, 2, 1)),
-            # nn.GroupNorm(ng, nf),
+            # GroupNormUnscaled(ng, nf),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng * 2, nf * 2),
+            GroupNormUnscaled(ng * 2, nf * 2),
             nn.LeakyReLU(0.2, True),
             AdditiveMultiheadAttention2d(nf * 2, 1, nf * 2 // 8, normalize=False),
             spectral_init(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng * 4, nf * 4),
+            GroupNormUnscaled(ng * 4, nf * 4),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Conv2d(nf * 4, 1, 4, 1, 0, bias=False)),
         )
@@ -41,14 +42,14 @@ class GanCmpD(nn.Module):
         ng = 2
         self.feature_net = nn.Sequential(
             spectral_init(nn.Conv2d(nc * 2, nf, 4, 2, 1)),
-            # nn.GroupNorm(ng, nf),
+            # GroupNormUnscaled(ng, nf),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng * 2, nf * 2),
+            GroupNormUnscaled(ng * 2, nf * 2),
             nn.LeakyReLU(0.2, True),
             AdditiveMultiheadAttention2d(nf * 2, 1, nf * 2 // 8, normalize=False),
             spectral_init(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng * 4, nf * 4),
+            GroupNormUnscaled(ng * 4, nf * 4),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Conv2d(nf * 4, 1, 4, 1, 0, bias=False)),
         )
@@ -68,23 +69,23 @@ class GanCmpDOld(nn.Module):
         ng = 2
         self.feature_net = nn.Sequential(
             spectral_init(nn.Conv2d(nc, nf, 4, 2, 1)),
-            # nn.GroupNorm(ng, nf),
+            # GroupNormUnscaled(ng, nf),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng * 2, nf * 2),
+            GroupNormUnscaled(ng * 2, nf * 2),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng * 4, nf * 4),
+            GroupNormUnscaled(ng * 4, nf * 4),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Conv2d(nf * 4, nf * 8, 4, 1, 0, bias=False)),
         )
         cmp_nf = nf * 8
         cmp_ng = ng * 8
         self.cmp_net = nn.Sequential(
-            nn.GroupNorm(cmp_ng * 2, cmp_nf * 2),
+            GroupNormUnscaled(cmp_ng * 2, cmp_nf * 2),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Linear(cmp_nf * 2, cmp_nf, bias=False)),
-            nn.GroupNorm(cmp_ng, cmp_nf),
+            GroupNormUnscaled(cmp_ng, cmp_nf),
             nn.LeakyReLU(0.2, True),
             spectral_init(nn.Linear(cmp_nf, 1, bias=False)),
         )
@@ -107,14 +108,14 @@ class GanG(nn.Module):
         ng = 2
         self.net = nn.Sequential(
             spectral_init(nn.ConvTranspose2d(nz, nf * 4, 4, 1, 0)),
-            # nn.GroupNorm(ng * 4, nf * 4),
+            # GroupNormUnscaled(ng * 4, nf * 4),
             nn.ReLU(True),
             spectral_init(nn.ConvTranspose2d(nf * 4, nf * 2, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng * 2, nf * 2),
+            GroupNormUnscaled(ng * 2, nf * 2),
             nn.ReLU(True),
             AdditiveMultiheadAttention2d(nf * 2, 1, nf * 2 // 8, normalize=False),
             spectral_init(nn.ConvTranspose2d(nf * 2, nf, 4, 2, 1, bias=False)),
-            nn.GroupNorm(ng, nf),
+            GroupNormUnscaled(ng, nf),
             nn.ReLU(True),
             nn.ConvTranspose2d(nf, nc, 4, 2, 1, bias=False),
             nn.Tanh(),
@@ -123,3 +124,39 @@ class GanG(nn.Module):
     def forward(self, noise):
         noise = noise.unsqueeze(-1).unsqueeze(-1)
         return self.net(noise)
+
+
+class GradRefiner(nn.Module):
+    def __init__(self, nc, nf):
+        super().__init__()
+        ng = 2
+        self.net = nn.Sequential(
+            spectral_init(nn.Conv2d(nc * 2, nf, 4, 2, 1)),
+            nn.ReLU(True),
+            spectral_init(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)),
+            GroupNormUnscaled(ng * 2, nf * 2),
+            nn.ReLU(True),
+            spectral_init(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False)),
+            GroupNormUnscaled(ng * 4, nf * 4),
+            nn.ReLU(True),
+
+            spectral_init(nn.Conv2d(nf * 4, nf * 4, 4, 1, 0)),
+            # GroupNormUnscaled(2, nf * 4),
+            nn.Tanh(),
+
+            spectral_init(nn.ConvTranspose2d(nf * 4, nf * 4, 4, 1, 0, bias=False)),
+            GroupNormUnscaled(ng * 4, nf * 4),
+            nn.ReLU(True),
+            spectral_init(nn.ConvTranspose2d(nf * 4, nf * 2, 4, 2, 1, bias=False)),
+            GroupNormUnscaled(ng * 2, nf * 2),
+            nn.ReLU(True),
+            spectral_init(nn.ConvTranspose2d(nf * 2, nf, 4, 2, 1, bias=False)),
+            GroupNormUnscaled(ng, nf),
+            nn.ReLU(True),
+
+            spectral_init(nn.ConvTranspose2d(nf, nc, 4, 2, 1)),
+        )
+
+    def forward(self, sample, grad):
+        # print(self.net(torch.cat([sample, grad], 1)).shape)
+        return self.net(torch.cat([sample, grad], 1))
