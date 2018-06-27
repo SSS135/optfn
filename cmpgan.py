@@ -5,6 +5,7 @@ from optfn.spectral_norm import spectral_norm
 from optfn.drrelu import DRReLU
 from optfn.multihead_attention import AdditiveMultiheadAttention2d
 from optfn.group_norm_unscaled import GroupNormUnscaled
+import math
 
 
 def spectral_init(module, gain=1):
@@ -34,6 +35,42 @@ class GanD(nn.Module):
 
     def forward(self, input):
         return self.net(input).view(-1)
+
+
+class GanDQ(nn.Module):
+    def __init__(self, nc, nf):
+        super().__init__()
+        ng = 2
+        self.net_start = nn.Sequential(
+            spectral_init(nn.Conv2d(nc, nf, 4, 2, 1)),
+            # GroupNormUnscaled(ng, nf),
+            nn.LeakyReLU(0.2, True),
+            spectral_init(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)),
+            GroupNormUnscaled(ng * 2, nf * 2),
+            nn.LeakyReLU(0.2, True),
+            AdditiveMultiheadAttention2d(nf * 2, 1, nf * 2 // 8, normalize=False),
+            spectral_init(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False)),
+            GroupNormUnscaled(ng * 4, nf * 4),
+            nn.LeakyReLU(0.2, True),
+            spectral_init(nn.Conv2d(nf * 4, nf * 4, 4, 1, 0, bias=False)),
+            GroupNormUnscaled(4, nf * 4),
+        )
+        self.tau_embedding = nn.Sequential(
+            spectral_init(nn.Linear(nf * 4, nf * 4)),
+            nn.LeakyReLU(0.1),
+        )
+        self.net_head = nn.Sequential(
+            spectral_init(nn.Linear(nf * 4, 1)),
+        )
+
+    def forward(self, input: torch.Tensor, tau: torch.Tensor):
+        assert tau.dim() == 2
+        features = self.net_start(input).view(input.shape[0], -1)
+        arange = torch.arange(1, features.shape[-1] + 1, device=input.device, dtype=input.dtype).unsqueeze(0)
+        tau_emb = self.tau_embedding(torch.cos(math.pi * arange * tau.view(-1, 1)))
+        features_repeat = features.view(input.shape[0], 1, -1).repeat(1, tau.shape[1], 1).view(-1, features.shape[-1])
+        head = self.net_head(tau_emb * features_repeat)
+        return head.view_as(tau)
 
 
 class GanCmpD(nn.Module):
