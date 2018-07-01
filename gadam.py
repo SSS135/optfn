@@ -6,11 +6,13 @@ from torch.optim.optimizer import Optimizer
 
 class GAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0,
-                 avg_sq_mode='weight', amsgrad=False, weight_decay=0, eps=1e-8):
+                 avg_sq_mode='weight', amsgrad=False, amaxgrad=False, amsgrad_decay=0, weight_decay=0, eps=1e-8):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight' or 'output'
         """
-        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, eps=eps, weight_decay=weight_decay)
+        assert not amaxgrad or amsgrad
+        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, amaxgrad=amaxgrad,
+                        amsgrad_decay=amsgrad_decay, eps=eps, weight_decay=weight_decay)
         self.avg_sq_mode = avg_sq_mode
         super().__init__(params, defaults)
 
@@ -38,6 +40,8 @@ class GAdam(Optimizer):
 
                 state = self.state[p]
                 amsgrad = group['amsgrad']
+                amaxgrad = group['amaxgrad']
+                amsgrad_decay = group['amsgrad_decay']
 
                 # State initialization
                 if len(state) == 0:
@@ -60,7 +64,9 @@ class GAdam(Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
 
                 if amsgrad:
-                    torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
+                    if amsgrad_decay != 0:
+                        max_exp_avg_sq.mul_(1 - amsgrad_decay)
+                    torch.max(max_exp_avg_sq, grad ** 2 if amaxgrad else exp_avg_sq, out=max_exp_avg_sq)
                     if self.avg_sq_mode == 'global':
                         exp_avg_sq_list.append(max_exp_avg_sq.mean())
                 else:
