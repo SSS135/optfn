@@ -76,13 +76,13 @@ class QRNNLayer(nn.Module):
 
         self.norm = None
         if norm is not None:
-            lin_nf = 4 * self.hidden_size if self.output_gate else 3 * self.hidden_size
+            nf_mult = 4 if self.output_gate else 3
             if 'group' in norm:
-                self.norm = nn.GroupNorm(32, lin_nf)
+                self.norm = nn.GroupNorm(nf_mult * self.hidden_size // 16, nf_mult * self.hidden_size)
             elif 'layer' in norm:
-                self.norm = nn.LayerNorm(lin_nf)
+                self.norm = nn.LayerNorm(nf_mult * self.hidden_size)
             elif 'batch' in norm:
-                self.norm = nn.BatchNorm1d(lin_nf)
+                self.norm = nn.BatchNorm1d(nf_mult * self.hidden_size)
 
     def reset(self):
         # If you are saving the previous value of x, you should call this when starting with a new state

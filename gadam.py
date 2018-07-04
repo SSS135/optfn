@@ -5,14 +5,13 @@ from torch.optim.optimizer import Optimizer
 
 
 class GAdam(Optimizer):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0,
-                 avg_sq_mode='weight', amsgrad=False, amaxgrad=False, amsgrad_decay=0, weight_decay=0, eps=1e-8):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0, avg_sq_mode='weight',
+                 amsgrad=False, amsgrad_decay=0, weight_decay=0, l1_decay=0, late_weight_decay=True, eps=1e-8):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight' or 'output'
         """
-        assert not amaxgrad or amsgrad
-        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, amaxgrad=amaxgrad,
-                        amsgrad_decay=amsgrad_decay, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, amsgrad_decay=amsgrad_decay,
+                        weight_decay=weight_decay, l1_decay=l1_decay, late_weight_decay=late_weight_decay, eps=eps)
         self.avg_sq_mode = avg_sq_mode
         super().__init__(params, defaults)
 
@@ -40,7 +39,6 @@ class GAdam(Optimizer):
 
                 state = self.state[p]
                 amsgrad = group['amsgrad']
-                amaxgrad = group['amaxgrad']
                 amsgrad_decay = group['amsgrad_decay']
 
                 # State initialization
@@ -64,9 +62,7 @@ class GAdam(Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
 
                 if amsgrad:
-                    if amsgrad_decay != 0:
-                        max_exp_avg_sq.mul_(1 - amsgrad_decay)
-                    torch.max(max_exp_avg_sq, grad ** 2 if amaxgrad else exp_avg_sq, out=max_exp_avg_sq)
+                    torch.max(max_exp_avg_sq * (1 - amsgrad_decay), exp_avg_sq, out=max_exp_avg_sq)
                     if self.avg_sq_mode == 'global':
                         exp_avg_sq_list.append(max_exp_avg_sq.mean())
                 else:
@@ -109,22 +105,29 @@ class GAdam(Optimizer):
                 exp_avg = exp_avg / bias_correction1
                 exp_avg_sq = exp_avg_sq / bias_correction2
 
-                lr = group['lr']
-                nesterov = group['nesterov']
-                prev_shift = state['prev_shift']
-
                 if self.avg_sq_mode == 'weight' or self.avg_sq_mode == 'output':
                     denom = exp_avg_sq.sqrt().add_(group['eps'])
                 else:
                     denom = math.sqrt(exp_avg_sq) + group['eps']
 
-                exp_avg = exp_avg.div(denom)
+                late_weight_decay = group['late_weight_decay']
+                if late_weight_decay:
+                    exp_avg = exp_avg.div(denom)
 
                 weight_decay = group['weight_decay']
+                l1_decay = group['l1_decay']
                 if weight_decay != 0:
                     exp_avg.add_(weight_decay, p.data)
+                if l1_decay != 0:
+                    exp_avg.add_(l1_decay, p.data.sign())
 
+                if not late_weight_decay:
+                    exp_avg = exp_avg.div(denom)
+
+                lr = group['lr']
+                nesterov = group['nesterov']
                 if nesterov != 0:
+                    prev_shift = state['prev_shift']
                     p.data.sub_(nesterov, prev_shift)
                     cur_shift = (-lr / (1 - nesterov)) * exp_avg
                     prev_shift.copy_(cur_shift)
