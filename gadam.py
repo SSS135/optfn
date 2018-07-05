@@ -6,11 +6,11 @@ from torch.optim.optimizer import Optimizer
 
 class GAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0, avg_sq_mode='weight',
-                 amsgrad=False, amsgrad_decay=0, weight_decay=0, l1_decay=0, late_weight_decay=True, eps=1e-8):
+                 amsgrad_decay=1, weight_decay=0, l1_decay=0, late_weight_decay=True, eps=1e-8):
         """
         :param avg_sq_mode: 'global' or 'tensor' or 'weight' or 'output'
         """
-        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad=amsgrad, amsgrad_decay=amsgrad_decay,
+        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad_decay=amsgrad_decay,
                         weight_decay=weight_decay, l1_decay=l1_decay, late_weight_decay=late_weight_decay, eps=eps)
         self.avg_sq_mode = avg_sq_mode
         super().__init__(params, defaults)
@@ -38,8 +38,8 @@ class GAdam(Optimizer):
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
 
                 state = self.state[p]
-                amsgrad = group['amsgrad']
                 amsgrad_decay = group['amsgrad_decay']
+                amsgrad = amsgrad_decay != 1
 
                 # State initialization
                 if len(state) == 0:
@@ -77,7 +77,8 @@ class GAdam(Optimizer):
                 if p.grad is None:
                     continue
                 state = self.state[p]
-                amsgrad = group['amsgrad']
+                amsgrad_decay = group['amsgrad_decay']
+                amsgrad = amsgrad_decay != 1
 
                 exp_avg = state['exp_avg']
 
