@@ -6,7 +6,7 @@ from torch.autograd import Variable
 
 
 class GradRunningNorm(nn.Module):
-    def __init__(self, weight=1, momentum=0.999):
+    def __init__(self, weight=1, momentum=0.99):
         super().__init__()
         self.momentum = momentum
         self.weight = weight
