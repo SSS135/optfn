@@ -5,12 +5,58 @@ from torch.optim.optimizer import Optimizer
 
 
 class GAdam(Optimizer):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), nesterov=0.0, avg_sq_mode='weight',
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), optimism=0.0, avg_sq_mode='weight',
                  amsgrad_decay=1, weight_decay=0, l1_decay=0, late_weight_decay=True, eps=1e-8):
+        """Implements generalization of Adam, AdaMax, AMSGrad algorithms.
+
+        Adam and AdaMax has been proposed in `Adam: A Method for Stochastic Optimization`_.
+
+        With `betas` = (beta1, 0) and `amsgrad_decay` = beta2 it will become AdaMax.
+        With `amsgrad_decay` = 0 it will become AMSGrad.
+        I've found it's better to use something in-between.
+            `betas` = (0.9, 0.99) and `amsgrad_decay` = (0.0001) or
+            `betas` = (0.9, 0.95) and `amsgrad_decay` = (0.05)
+            worked best for me, but I've seen good results with wide range of settings.
+
+        Args:
+            params (iterable): iterable of parameters to optimize or dicts defining
+                parameter groups
+            lr (float, optional): learning rate (default: 1e-3)
+            betas (Tuple[float, float], optional): coefficients used for computing
+                running averages of gradient and its square (default: (0.9, 0.999))
+            optimism (float, optional): Look-ahead factor proposed in `Training GANs with Optimism`_.
+                Must be in [0, 1) range. Value of 0.5 corresponds to paper,
+                0 disables it, 0.9 is 5x stronger than 0.5 (default: 0)
+            avg_sq_mode (str, optional): Specifies how square gradient term should be calculated. Valid values are
+                'weight' will calculate it per-weight as in vanilla Adam (default)
+                'output' will average it over 0 dim of each tensor,
+                    i.e. shape[0] average squares will be used for each tensor
+                'tensor' will average it over each tensor
+                'global' will take average of average over each tensor,
+                    i.e. only one avg sq value will be used
+            amsgrad_decay (float, optional): Decay factor for maximum running square of gradient.
+                Should be in [0, 1] range.
+                0 will instantly update it to current running mean square (default)
+                1 will behave as proposed in `On the Convergence of Adam and Beyond`_
+                Values between 0 and 1 will pull maximum mean square closer to current mean square on each step
+            weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+            l1_decay (float, optional): L1 penalty (default: 0)
+            late_weight_decay (boolean, optional): Whether L1 and L2 penalty should be
+                applied before (as proposed in 'Fixing Weight Decay Regularization in Adam'_)
+                or after (vanilla Adam) normalization with gradient average squares (default: True)
+            eps (float, optional): term added to the denominator to improve
+                numerical stability (default: 1e-8)
+
+        .. _Adam\: A Method for Stochastic Optimization:
+            https://arxiv.org/abs/1412.6980
+        .. _On the Convergence of Adam and Beyond:
+            https://openreview.net/forum?id=ryQu7f-RZ
+        .. _Training GANs with Optimism:
+            https://arxiv.org/abs/1711.00141
+        .. _Fixing Weight Decay Regularization in Adam:
+            https://arxiv.org/abs/1711.05101
         """
-        :param avg_sq_mode: 'global' or 'tensor' or 'weight' or 'output'
-        """
-        defaults = dict(lr=lr, betas=betas, nesterov=nesterov, amsgrad_decay=amsgrad_decay,
+        defaults = dict(lr=lr, betas=betas, optimism=optimism, amsgrad_decay=amsgrad_decay,
                         weight_decay=weight_decay, l1_decay=l1_decay, late_weight_decay=late_weight_decay, eps=eps)
         self.avg_sq_mode = avg_sq_mode
         super().__init__(params, defaults)
@@ -126,11 +172,11 @@ class GAdam(Optimizer):
                     exp_avg = exp_avg.div(denom)
 
                 lr = group['lr']
-                nesterov = group['nesterov']
-                if nesterov != 0:
+                optimism = group['optimism']
+                if optimism != 0:
                     prev_shift = state['prev_shift']
-                    p.data.sub_(nesterov, prev_shift)
-                    cur_shift = (-lr / (1 - nesterov)) * exp_avg
+                    p.data.sub_(optimism, prev_shift)
+                    cur_shift = (-lr / (1 - optimism)) * exp_avg
                     prev_shift.copy_(cur_shift)
                     p.data.add_(cur_shift)
                 else:
