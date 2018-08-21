@@ -22,7 +22,7 @@ class AutoNorm(Module):
     def forward(self, input):
         wshape = -1, *([1] * (input.dim() - 2))
         return F.group_norm(input, 1, self.weight[0], self.bias[0], self.eps) + \
-               F.group_norm(input, self.num_features // self.group_size, self.weight[1], self.bias[1], self.eps) + \
+               F.group_norm(input, max(1, self.num_features // self.group_size), self.weight[1], self.bias[1], self.eps) + \
                F.group_norm(input, self.num_features, self.weight[2], self.bias[2], self.eps) + \
                input * self.weight[3].view(wshape) + self.bias[3].view(wshape)
 
