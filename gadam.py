@@ -183,7 +183,7 @@ class GAdam(Optimizer):
                 if optimism != 0:
                     prev_shift = state['prev_shift']
                     p.data.sub_(optimism, prev_shift)
-                    cur_shift = (-lr / (1 - optimism)) * exp_avg
+                    cur_shift = float(-lr / (1 - optimism)) * exp_avg
                     prev_shift.copy_(cur_shift)
                     p.data.add_(cur_shift)
                 else:
