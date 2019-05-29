@@ -6,10 +6,11 @@ from torch.autograd import Variable
 
 
 class GradRunningNorm(nn.Module):
-    def __init__(self, weight=1, momentum=0.99):
+    def __init__(self, weight=1, momentum=0.99, eps=1e-5):
         super().__init__()
         self.momentum = momentum
         self.weight = weight
+        self.eps = eps
         self._avg_sq = 0
         self._step = 0
         self.register_backward_hook(self.backward_hook)
@@ -23,7 +24,7 @@ class GradRunningNorm(nn.Module):
 
         self._step += 1
         bias_correction = 1 - self.momentum ** self._step
-        norm = (self._avg_sq / bias_correction) ** 0.5
+        norm = (self._avg_sq / bias_correction) ** 0.5 + self.eps
         return self.weight / norm * grad_input,
 
     def forward(self, input: torch.Tensor):
