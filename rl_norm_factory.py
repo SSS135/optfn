@@ -1,5 +1,5 @@
 from .auto_norm import AutoNorm
-from ppo_pytorch.models.norm_factory import NormFactory
+from ppo_pytorch.actors.norm_factory import NormFactory
 
 
 class AutoNormFactory(NormFactory):
