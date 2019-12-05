@@ -18,7 +18,7 @@ class GAdam(Optimizer):
 
         Adam and AdaMax has been proposed in `Adam: A Method for Stochastic Optimization`_.
 
-        With `betas` = (beta1, 0) and `amsgrad_decay` = beta2 it will become AdaMax.
+        With `betas` = (beta1, 0) and `amsgrad_decay` = 1 - beta2 it will become AdaMax.
         With `amsgrad_decay` = 0 it will become AMSGrad.
         I've found it's better to use something in-between.
             `betas` = (0.9, 0.99) and `amsgrad_decay` = (0.0001) or
