@@ -13,7 +13,7 @@ from torch.optim.optimizer import Optimizer
 
 class GAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), optimism=0.0, avg_sq_mode='weight',
-                 amsgrad_decay=1, weight_decay=0, l1_decay=0, late_weight_decay=True, eps=1e-8):
+                 amsgrad_decay=1, weight_decay=0, l1_decay=0, late_weight_decay=True, max_grad_scale=None, eps=1e-8):
         """Implements generalization of Adam, AdaMax, AMSGrad algorithms.
 
         Adam and AdaMax has been proposed in `Adam: A Method for Stochastic Optimization`_.
@@ -63,8 +63,8 @@ class GAdam(Optimizer):
         .. _Fixing Weight Decay Regularization in Adam:
             https://arxiv.org/abs/1711.05101
         """
-        defaults = dict(lr=lr, betas=betas, optimism=optimism, amsgrad_decay=amsgrad_decay,
-                        weight_decay=weight_decay, l1_decay=l1_decay, late_weight_decay=late_weight_decay, eps=eps)
+        defaults = dict(lr=lr, betas=betas, optimism=optimism, amsgrad_decay=amsgrad_decay, weight_decay=weight_decay,
+                        l1_decay=l1_decay, late_weight_decay=late_weight_decay, max_grad_scale=max_grad_scale, eps=eps)
         self.avg_sq_mode = avg_sq_mode
         super().__init__(params, defaults)
 
@@ -111,8 +111,16 @@ class GAdam(Optimizer):
                     max_exp_avg_sq = state['max_exp_avg_sq']
                 beta1, beta2 = group['betas']
 
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+
+                max_grad_scale = group['max_grad_scale']
+                if max_grad_scale is not None:
+                    bias_correction2 = 1 - beta2 ** (state['step'] + 1)
+                    denom = exp_avg_sq.div(bias_correction2).sqrt_()
+                    torch.min(grad, denom.mul_(max_grad_scale), out=grad)
+                    torch.max(grad, denom.neg_(), out=grad)
+
+                exp_avg.mul_(beta1).add_(1 - beta1, grad)
 
                 if amsgrad:
                     torch.max(max_exp_avg_sq * (1 - amsgrad_decay), exp_avg_sq, out=max_exp_avg_sq)
